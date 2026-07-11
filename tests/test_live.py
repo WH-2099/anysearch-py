@@ -1,29 +1,38 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 from anysearch_py import Client, Domain, MCPClient
 
-ENV_FILES = (Path(".env"), Path("anysearch-skill/.env"))
+ENV_FILE = Path(".env")
 
 
 def load_api_key() -> str:
-    for env_file in ENV_FILES:
-        if not env_file.is_file():
-            continue
+    api_key = os.getenv("ANYSEARCH_API_KEY", "").strip()
+    if api_key:
+        return api_key
 
-        for line in env_file.read_text(encoding="utf-8-sig").splitlines():
+    if ENV_FILE.is_file():
+        for line in ENV_FILE.read_text(encoding="utf-8-sig").splitlines():
             stripped = line.strip()
             if not stripped or stripped.startswith("#") or "=" not in stripped:
                 continue
 
             key, _, value = stripped.partition("=")
-            if key.strip().lstrip("\ufeff") == "ANYSEARCH_API_KEY":
-                return value.strip().strip("\"'")
+            api_key = value.strip().strip("\"'").strip()
+            if key.strip().lstrip("\ufeff") == "ANYSEARCH_API_KEY" and api_key:
+                return api_key
 
-    pytest.skip("ANYSEARCH_API_KEY was not found in .env or anysearch-skill/.env")
+    pytest.skip("ANYSEARCH_API_KEY was not found in the environment or .env")
+
+
+def test_load_api_key_prefers_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANYSEARCH_API_KEY", " environment-key ")
+
+    assert load_api_key() == "environment-key"
 
 
 def test_live_rest_search_smoke() -> None:

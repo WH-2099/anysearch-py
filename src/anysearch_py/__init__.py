@@ -30,7 +30,6 @@ from .models import (
     SearchResponse,
     SearchResult,
     SearchTag,
-    SubDomainParams,
     ToolName,
     Zone,
 )
@@ -65,7 +64,6 @@ __all__ = [
     "SearchResponse",
     "SearchResult",
     "SearchTag",
-    "SubDomainParams",
     "ToolName",
     "TransportError",
     "Zone",

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
 from typing import Annotated, Any, ClassVar, Literal, Self
@@ -12,7 +11,10 @@ from pydantic import (
     ConfigDict,
     Field,
     HttpUrl,
-    RootModel,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
     StringConstraints,
     TypeAdapter,
     ValidationError,
@@ -22,21 +24,12 @@ from pydantic import (
 
 from .exceptions import APIError, JSONRPCError, ResponseValidationError
 
-type JsonScalar = str | int | float | bool | None
+type JsonScalar = StrictStr | StrictInt | StrictFloat | StrictBool | None
 type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
 type JsonObject = dict[str, JsonValue]
 type SearchArgumentInput = SearchArguments | str | Mapping[str, Any]
 
 NonEmptyString = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
-LanguageCode = Annotated[
-    str,
-    StringConstraints(
-        strip_whitespace=True,
-        min_length=2,
-        max_length=16,
-        pattern=r"^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})?$",
-    ),
-]
 SubDomainName = Annotated[
     str,
     StringConstraints(
@@ -58,6 +51,7 @@ class StrictRequestModel(BaseModel):
         populate_by_name=True,
         str_strip_whitespace=True,
         validate_default=True,
+        allow_inf_nan=False,
     )
 
     def to_payload(self) -> JsonObject:
@@ -163,38 +157,43 @@ class SearchRequest(StrictRequestModel):
     """REST /v1/search request."""
 
     query: NonEmptyString
-    max_results: int = Field(default=10, ge=1, le=20)
+    max_results: StrictInt = Field(default=10, ge=1, le=20)
     tag: SearchTag | None = None
     zone: Zone | None = None
-    language: LanguageCode | None = None
+    language: NonEmptyString | None = None
     params: JsonObject | None = None
     format: OutputFormat = OutputFormat.JSON
 
     @classmethod
     def from_input(
         cls,
-        request: Self | str,
+        query: Self | str,
         *,
-        max_results: int = 10,
+        max_results: int | None = None,
         tag: SearchTag | str | None = None,
         zone: Zone | str | None = None,
         language: str | None = None,
         params: Mapping[str, JsonValue] | None = None,
-        output_format: OutputFormat | str = OutputFormat.JSON,
+        output_format: OutputFormat | str | None = None,
     ) -> Self:
-        if not isinstance(request, str):
-            return request
-        return cls.model_validate(
-            {
-                "query": request,
+        modifiers = {
+            key: value
+            for key, value in {
                 "max_results": max_results,
                 "tag": tag,
                 "zone": zone,
                 "language": language,
                 "params": dict(params) if params is not None else None,
                 "format": output_format,
-            },
-        )
+            }.items()
+            if value is not None
+        }
+        if isinstance(query, SearchRequest):
+            if modifiers:
+                msg = "keyword arguments cannot be combined with SearchRequest"
+                raise ValueError(msg)
+            return query
+        return cls.model_validate({"query": query, **modifiers})
 
 
 class SearchResult(ResponseModel):
@@ -209,8 +208,8 @@ class SearchResult(ResponseModel):
 class SearchMetadata(ResponseModel):
     """REST search metadata."""
 
-    total_results: int = Field(ge=0)
-    search_time_ms: int = Field(ge=0)
+    total_results: StrictInt = Field(ge=0)
+    search_time_ms: StrictInt = Field(ge=0)
 
 
 class SearchData(ResponseModel):
@@ -264,13 +263,18 @@ class APIErrorDetails(ResponseModel):
         try:
             return _JSON_VALUE.validate_python(value)
         except ValidationError:
+            if isinstance(value, bytes):
+                try:
+                    return value.decode()
+                except UnicodeDecodeError:
+                    pass
             return str(value)
 
 
 class APIEnvelope[DataT](ResponseModel):
     """Standard REST response envelope."""
 
-    code: int
+    code: StrictInt
     message: str
     request_id: str | None = None
     data: DataT | None = None
@@ -312,30 +316,6 @@ class SearchResponse(APIEnvelope[SearchData]):
             raise ResponseValidationError(msg, payload=payload) from exc
 
 
-class SubDomainParams(RootModel[JsonObject]):
-    """MCP sub-domain parameters."""
-
-    @model_validator(mode="before")
-    @classmethod
-    def parse_params(cls, value: Any) -> Any:
-        if not isinstance(value, str):
-            return value
-
-        stripped = value.strip()
-        if not stripped:
-            return None
-
-        try:
-            return json.loads(stripped)
-        except json.JSONDecodeError:
-            parsed = {}
-            for item in stripped.split(","):
-                key, separator, raw_value = item.partition("=")
-                if separator and key.strip():
-                    parsed[key.strip()] = raw_value.strip()
-            return parsed or value
-
-
 class MCPArguments(StrictRequestModel):
     """Base class for MCP tool arguments."""
 
@@ -353,12 +333,12 @@ class SearchArguments(MCPArguments):
     query: NonEmptyString
     domain: Domain | None = None
     sub_domain: SubDomainName | None = None
-    sub_domain_params: SubDomainParams | None = None
-    max_results: int | None = Field(default=None, ge=1, le=10)
+    sub_domain_params: JsonObject | None = None
+    max_results: StrictInt | None = Field(default=None, ge=1, le=10)
 
     @classmethod
     def from_input(
-        cls, arguments: Self | str | Mapping[str, Any], **kwargs: Any
+        cls, arguments: SearchArguments | str | Mapping[str, Any], **kwargs: Any
     ) -> SearchArguments:
         if isinstance(arguments, SearchArguments):
             if kwargs:
@@ -392,19 +372,25 @@ class BatchSearchArguments(MCPArguments):
     @classmethod
     def from_queries(
         cls,
-        queries: Sequence[SearchArgumentInput],
+        queries: BatchSearchArguments | Sequence[SearchArgumentInput],
         *,
         domain: Domain | str | None = None,
         sub_domain: str | None = None,
-        sub_domain_params: SubDomainParams
-        | Mapping[str, JsonValue]
-        | str
-        | None = None,
-    ) -> Self:
+        sub_domain_params: Mapping[str, JsonValue] | None = None,
+    ) -> BatchSearchArguments:
+        if isinstance(queries, BatchSearchArguments):
+            if any(
+                value is not None for value in (domain, sub_domain, sub_domain_params)
+            ):
+                msg = "shared arguments cannot be combined with BatchSearchArguments"
+                raise ValueError(msg)
+            return queries
+        if isinstance(queries, str):
+            msg = "queries must be a sequence, not a string"
+            raise TypeError(msg)
+
         shared_params = (
-            SubDomainParams.model_validate(sub_domain_params)
-            if sub_domain_params is not None
-            else None
+            dict(sub_domain_params) if sub_domain_params is not None else None
         )
         items: list[SearchArguments] = []
         for query in queries:
@@ -421,7 +407,7 @@ class BatchSearchArguments(MCPArguments):
             if sub_domain is not None and values.get("sub_domain") is None:
                 values["sub_domain"] = sub_domain
             if shared_params is not None and values.get("sub_domain_params") is None:
-                values["sub_domain_params"] = shared_params.root
+                values["sub_domain_params"] = shared_params
             items.append(SearchArguments.model_validate(values))
         return cls(queries=tuple(items))
 
@@ -441,6 +427,9 @@ class GetSubDomainsArguments(MCPArguments):
         domain: Domain | str | None = None,
         domains: Sequence[Domain | str] | None = None,
     ) -> Self:
+        if isinstance(domains, str):
+            msg = "domains must be a sequence, not a string"
+            raise TypeError(msg)
         return cls.model_validate(
             {
                 "domain": domain,
@@ -476,12 +465,19 @@ class MCPContentBlock(ResponseModel):
     type: str
     text: str | None = None
 
+    @model_validator(mode="after")
+    def validate_text_block(self) -> Self:
+        if self.type == "text" and self.text is None:
+            msg = "MCP text content must include text"
+            raise ValueError(msg)
+        return self
+
 
 class MCPToolResult(ResponseModel):
     """MCP tools/call result."""
 
-    content: tuple[MCPContentBlock, ...] = ()
-    is_error: bool = Field(default=False, alias="isError")
+    content: tuple[MCPContentBlock, ...]
+    is_error: StrictBool = Field(default=False, alias="isError")
 
     @computed_field
     @property
@@ -498,7 +494,7 @@ class MCPToolResult(ResponseModel):
 
 
 class JSONRPCErrorObject(ResponseModel):
-    code: int
+    code: StrictInt
     message: str
     data: JsonValue | None = None
 
@@ -507,14 +503,14 @@ class JSONRPCErrorObject(ResponseModel):
 
 
 class JSONRPCResponse[DataT](ResponseModel):
-    jsonrpc: Literal["2.0"] = "2.0"
-    id: int | str | None = None
+    jsonrpc: Literal["2.0"]
+    id: StrictInt | StrictStr
     result: DataT | None = None
     error: JSONRPCErrorObject | None = None
 
     @model_validator(mode="after")
     def validate_result_or_error(self) -> Self:
-        if (self.result is None) == (self.error is None):
+        if ("result" in self.model_fields_set) == ("error" in self.model_fields_set):
             msg = "JSON-RPC response must contain exactly one of result or error"
             raise ValueError(msg)
         return self
@@ -532,12 +528,21 @@ class MCPToolResponse(JSONRPCResponse[MCPToolResult]):
     """Successful MCP tools/call response."""
 
     @classmethod
-    def from_payload(cls, payload: Any) -> MCPToolResult:
+    def from_payload(
+        cls,
+        payload: Any,
+        *,
+        expected_id: int | str | None = None,
+    ) -> MCPToolResult:
         try:
-            result = cls.model_validate(payload).unwrap()
+            response = cls.model_validate(payload)
         except ValidationError as exc:
             msg = "MCP response does not match JSON-RPC tools/call schema"
             raise ResponseValidationError(msg, payload=payload) from exc
+        if expected_id is not None and response.id != expected_id:
+            msg = "MCP response id does not match request id"
+            raise ResponseValidationError(msg, payload=payload)
+        result = response.unwrap()
         result.raise_if_error()
         return result
 
@@ -549,7 +554,7 @@ class JSONRPCToolCallParams(StrictRequestModel):
 
 class JSONRPCToolCallRequest(StrictRequestModel):
     jsonrpc: Literal["2.0"] = "2.0"
-    id: int
+    id: StrictInt
     method: Literal["tools/call"] = "tools/call"
     params: JSONRPCToolCallParams
 
@@ -563,12 +568,23 @@ class MCPToolCall(StrictRequestModel):
     @classmethod
     def from_arguments(
         cls,
-        name: ToolName | str,
-        arguments: MCPArguments | Mapping[str, JsonValue] | None = None,
+        tool: ToolName | str | MCPArguments | MCPToolCall,
+        arguments: Mapping[str, JsonValue] | None = None,
     ) -> MCPToolCall:
+        if isinstance(tool, MCPToolCall | MCPArguments):
+            if arguments is not None:
+                msg = "arguments cannot be combined with a pre-built tool call"
+                raise ValueError(msg)
+            return tool if isinstance(tool, MCPToolCall) else tool.to_tool_call()
         if isinstance(arguments, MCPArguments):
-            return arguments.to_tool_call()
-        return cls.model_validate({"name": name, "arguments": dict(arguments or {})})
+            msg = "pass MCPArguments as the first argument"
+            raise TypeError(msg)
+        return cls.model_validate(
+            {
+                "name": tool,
+                "arguments": dict(arguments) if arguments is not None else {},
+            },
+        )
 
     def to_request(self, request_id: int) -> JSONRPCToolCallRequest:
         return JSONRPCToolCallRequest(

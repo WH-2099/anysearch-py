@@ -2,23 +2,31 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from importlib.metadata import version
 from typing import Any
 
 import pytest
+import urllib3
+from urllib3.exceptions import NewConnectionError, ReadTimeoutError
 
 from anysearch_py import (
     APIError,
     AsyncClient,
     AsyncMCPClient,
+    BatchSearchArguments,
     Client,
     Domain,
     HTTPStatusError,
     MCPClient,
     ResponseDecodeError,
+    ResponseValidationError,
+    SearchArguments,
     SearchRequest,
     SearchResponse,
     SearchTag,
+    TransportError,
 )
+from anysearch_py.client import DEFAULT_RETRIES
 
 
 class FakeResponse:
@@ -28,11 +36,12 @@ class FakeResponse:
         *,
         status: int = 200,
         headers: dict[str, str] | None = None,
+        data: bytes = b"not-json",
     ) -> None:
         self.payload = payload
         self.status = status
         self.headers = headers or {}
-        self.data = b"not-json"
+        self.data = data
 
     def json(self) -> object:
         if isinstance(self.payload, BaseException):
@@ -49,8 +58,28 @@ class FakeHTTP:
         self.calls.append((args, kwargs))
         return self.response
 
+    def __bool__(self) -> bool:
+        return False
 
-class AsyncFakeResponse(FakeResponse):
+
+class AsyncFakeResponse:
+    def __init__(
+        self,
+        payload: object,
+        *,
+        status: int = 200,
+        headers: dict[str, str] | None = None,
+        data: bytes = b"not-json",
+    ) -> None:
+        self.payload = payload
+        self.status = status
+        self.headers = headers or {}
+        self._data = data
+
+    @property
+    async def data(self) -> bytes:
+        return self._data
+
     async def json(self) -> object:
         if isinstance(self.payload, BaseException):
             raise self.payload
@@ -65,6 +94,9 @@ class AsyncFakeHTTP:
     async def request(self, *args: Any, **kwargs: Any) -> AsyncFakeResponse:
         self.calls.append((args, kwargs))
         return self.response
+
+    def __bool__(self) -> bool:
+        return False
 
 
 def search_payload() -> dict[str, object]:
@@ -88,10 +120,10 @@ def search_payload() -> dict[str, object]:
     }
 
 
-def mcp_payload(text: str) -> dict[str, object]:
+def mcp_payload(text: str, *, request_id: int = 1) -> dict[str, object]:
     return {
         "jsonrpc": "2.0",
-        "id": 1,
+        "id": request_id,
         "result": {
             "content": [
                 {
@@ -158,6 +190,10 @@ def test_rest_client_sends_search_payload_matrix(
     args, request_kwargs = http.calls[0]
     assert args[:2] == ("POST", "https://api.anysearch.com/v1/search")
     assert request_kwargs["headers"]["Authorization"] == "Bearer test-key"
+    assert request_kwargs["headers"]["User-Agent"] == (
+        f"anysearch-py/{version('anysearch-py')}"
+    )
+    assert "X-Anysearch-Client" not in request_kwargs["headers"]
     assert request_kwargs["json"] == expected_json
 
 
@@ -166,7 +202,7 @@ def call_mcp_search(client: MCPClient) -> str:
         "AAPL",
         domain=Domain.FINANCE,
         sub_domain="finance.quote",
-        sub_domain_params="type=stock,symbol=AAPL,cn_code=",
+        sub_domain_params={"type": "stock", "symbol": "AAPL", "cn_code": ""},
         max_results=5,
     )
 
@@ -175,11 +211,18 @@ def call_mcp_batch_search(client: MCPClient) -> str:
     return client.batch_search(
         [
             "AAPL",
-            {"query": "MSFT", "sub_domain_params": "type=stock,symbol=MSFT,cn_code="},
+            {
+                "query": "MSFT",
+                "sub_domain_params": {
+                    "type": "stock",
+                    "symbol": "MSFT",
+                    "cn_code": "",
+                },
+            },
         ],
         domain=Domain.FINANCE,
         sub_domain="finance.quote",
-        sub_domain_params="type=stock,symbol=AAPL,cn_code=",
+        sub_domain_params={"type": "stock", "symbol": "AAPL", "cn_code": ""},
     )
 
 
@@ -266,6 +309,7 @@ def test_mcp_client_sends_tool_call_payload_matrix(
     args, request_kwargs = http.calls[0]
     assert args[:2] == ("POST", "https://api.anysearch.com/mcp")
     assert request_kwargs["headers"]["Authorization"] == "Bearer test-key"
+    assert request_kwargs["headers"]["X-Anysearch-Client"] == "mcp/1.0.0"
     assert request_kwargs["json"] == {
         "jsonrpc": "2.0",
         "id": 1,
@@ -278,19 +322,20 @@ def test_mcp_client_sends_tool_call_payload_matrix(
 
 
 @pytest.mark.parametrize(
-    ("response", "expected_type", "expected_code"),
+    ("response", "expected_type", "expected_code", "expected_request_id"),
     [
         (
             FakeResponse(
                 {
                     "code": -1,
                     "message": "Missing required params",
-                    "request_id": "req-err",
                     "data": {"quota_remaining": 0},
                 },
+                headers={"X-Request-ID": "req-err"},
             ),
             APIError,
             -1,
+            "req-err",
         ),
         (
             FakeResponse(
@@ -300,10 +345,12 @@ def test_mcp_client_sends_tool_call_payload_matrix(
             ),
             HTTPStatusError,
             "BAD_REQUEST",
+            "http-err",
         ),
         (
             FakeResponse(ValueError("bad json")),
             ResponseDecodeError,
+            None,
             None,
         ),
     ],
@@ -312,6 +359,7 @@ def test_rest_client_raises_typed_errors(
     response: FakeResponse,
     expected_type: type[Exception],
     expected_code: int | str | None,
+    expected_request_id: str | None,
 ) -> None:
     client = Client(http=FakeHTTP(response))
 
@@ -319,6 +367,95 @@ def test_rest_client_raises_typed_errors(
         client.search("Go")
 
     assert getattr(caught.value, "code", None) == expected_code
+    assert getattr(caught.value, "request_id", None) == expected_request_id
+
+
+def test_non_json_http_errors_preserve_http_metadata() -> None:
+    response = FakeResponse(
+        ValueError("bad json"),
+        status=503,
+        headers={"Retry-After": "30", "X-Request-ID": "req-http"},
+        data=b"<html>unavailable</html>",
+    )
+
+    with pytest.raises(HTTPStatusError) as caught:
+        Client(http=FakeHTTP(response)).search("Go")
+
+    assert caught.value.status == 503
+    assert caught.value.request_id == "req-http"
+    assert caught.value.headers["Retry-After"] == "30"
+    assert caught.value.data == "<html>unavailable</html>"
+
+
+def test_successful_non_json_response_preserves_raw_body() -> None:
+    with pytest.raises(ResponseDecodeError) as caught:
+        Client(http=FakeHTTP(FakeResponse(ValueError("bad json")))).search("Go")
+
+    assert caught.value.raw == b"not-json"
+
+
+def test_default_retries_only_retry_connection_failures() -> None:
+    assert DEFAULT_RETRIES.read == 0
+    assert DEFAULT_RETRIES.redirect == 0
+    assert DEFAULT_RETRIES.status == 0
+    assert DEFAULT_RETRIES.other == 0
+    assert not DEFAULT_RETRIES.is_retry("POST", 500)
+    assert not DEFAULT_RETRIES.is_retry("POST", 503, has_retry_after=True)
+    assert not DEFAULT_RETRIES.is_retry("POST", 429, has_retry_after=True)
+
+    pool = urllib3.HTTPConnectionPool("api.anysearch.com")
+    after_connect = DEFAULT_RETRIES.increment(
+        method="POST",
+        url="https://api.anysearch.com/v1/search",
+        error=NewConnectionError(pool, "connection failed"),
+    )
+    assert after_connect.connect == 1
+
+    with pytest.raises(ReadTimeoutError):
+        DEFAULT_RETRIES.increment(
+            method="POST",
+            url="https://api.anysearch.com/v1/search",
+            error=ReadTimeoutError(pool, "/v1/search", "read timed out"),
+        )
+
+
+def test_client_repr_does_not_expose_api_key() -> None:
+    assert "super-secret" not in repr(
+        Client(api_key="super-secret", http=FakeHTTP(FakeResponse(search_payload())))
+    )
+
+
+def test_prebuilt_requests_reject_ignored_modifiers() -> None:
+    http = FakeHTTP(FakeResponse(search_payload()))
+    request = SearchRequest(query="Go", max_results=2)
+    batch = BatchSearchArguments(queries=(SearchArguments(query="Go"),))
+    client = Client(http=http)
+    mcp_client = MCPClient(http=http)
+
+    with pytest.raises(ValueError, match="SearchRequest"):
+        client.search(request, max_results=10)
+    with pytest.raises(ValueError, match="BatchSearchArguments"):
+        mcp_client.batch_search(batch, domain=Domain.GENERAL)
+    with pytest.raises(TypeError, match="sequence"):
+        mcp_client.batch_search("abc")
+
+    async def run() -> None:
+        async_http = AsyncFakeHTTP(AsyncFakeResponse(search_payload()))
+        async_client = AsyncClient(http=async_http)
+        async_mcp_client = AsyncMCPClient(http=async_http)
+
+        with pytest.raises(ValueError, match="SearchRequest"):
+            await async_client.search(request, max_results=10)
+        with pytest.raises(ValueError, match="BatchSearchArguments"):
+            await async_mcp_client.batch_search(batch, domain=Domain.GENERAL)
+        with pytest.raises(TypeError, match="sequence"):
+            await async_mcp_client.batch_search("abc")
+
+        assert not async_http.calls
+
+    asyncio.run(run())
+
+    assert not http.calls
 
 
 def test_async_clients_use_same_payload_shapes() -> None:
@@ -326,7 +463,9 @@ def test_async_clients_use_same_payload_shapes() -> None:
         rest_http = AsyncFakeHTTP(AsyncFakeResponse(search_payload()))
         mcp_http = AsyncFakeHTTP(AsyncFakeResponse(mcp_payload("mcp ok")))
 
-        rest_response = await AsyncClient(http=rest_http).search("hello")
+        rest_response = await AsyncClient(http=rest_http).search(
+            SearchRequest(query="hello")
+        )
         mcp_text = await AsyncMCPClient(http=mcp_http).search("hello")
 
         return (
@@ -341,3 +480,98 @@ def test_async_clients_use_same_payload_shapes() -> None:
     assert mcp_text == "mcp ok"
     assert calls[0][0][:2] == ("POST", "https://api.anysearch.com/v1/search")
     assert calls[1][0][:2] == ("POST", "https://api.anysearch.com/mcp")
+    assert calls[1][1]["headers"]["X-Anysearch-Client"] == "mcp/1.0.0"
+
+
+def test_mcp_clients_reject_mismatched_response_ids() -> None:
+    with pytest.raises(ResponseValidationError, match="id"):
+        MCPClient(
+            http=FakeHTTP(FakeResponse(mcp_payload("wrong", request_id=2)))
+        ).search("hello")
+
+    async def run() -> None:
+        client = AsyncMCPClient(
+            http=AsyncFakeHTTP(AsyncFakeResponse(mcp_payload("wrong", request_id=2)))
+        )
+        with pytest.raises(ResponseValidationError, match="id"):
+            await client.search("hello")
+
+    asyncio.run(run())
+
+
+def test_async_non_json_responses_preserve_error_semantics() -> None:
+    async def run() -> tuple[HTTPStatusError, ResponseDecodeError, APIError]:
+        error_response = AsyncFakeResponse(
+            ValueError("bad json"),
+            status=503,
+            headers={"Retry-After": "30", "x-request-id": "req-async"},
+            data=b"<html>unavailable</html>",
+        )
+        decode_response = AsyncFakeResponse(
+            ValueError("bad json"),
+            data=b"not-json-async",
+        )
+        api_response = AsyncFakeResponse(
+            {"code": -1, "message": "bad request", "data": None},
+            headers={"x-request-id": "req-api"},
+        )
+
+        with pytest.raises(HTTPStatusError) as http_error:
+            await AsyncClient(http=AsyncFakeHTTP(error_response)).search("Go")
+        with pytest.raises(ResponseDecodeError) as decode_error:
+            await AsyncClient(http=AsyncFakeHTTP(decode_response)).search("Go")
+        with pytest.raises(APIError) as api_error:
+            await AsyncClient(http=AsyncFakeHTTP(api_response)).search("Go")
+        return http_error.value, decode_error.value, api_error.value
+
+    http_error, decode_error, api_error = asyncio.run(run())
+
+    assert http_error.status == 503
+    assert http_error.request_id == "req-async"
+    assert http_error.data == "<html>unavailable</html>"
+    assert decode_error.raw == b"not-json-async"
+    assert api_error.request_id == "req-api"
+
+
+def test_transport_errors_are_wrapped() -> None:
+    class FailingHTTP:
+        def request(self, *_: Any, **__: Any) -> None:
+            raise urllib3.exceptions.HTTPError
+
+    class AsyncFailingHTTP:
+        async def request(self, *_: Any, **__: Any) -> None:
+            raise urllib3.exceptions.HTTPError
+
+    with pytest.raises(TransportError) as sync_error:
+        Client(http=FailingHTTP()).search("hello")
+
+    async def run() -> TransportError:
+        with pytest.raises(TransportError) as async_error:
+            await AsyncClient(http=AsyncFailingHTTP()).search("hello")
+        return async_error.value
+
+    async_error = asyncio.run(run())
+
+    assert isinstance(sync_error.value.__cause__, urllib3.exceptions.HTTPError)
+    assert isinstance(async_error.__cause__, urllib3.exceptions.HTTPError)
+
+
+def test_async_client_awaits_owned_pool_clear(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class OwnedAsyncHTTP:
+        cleared = False
+
+        async def clear(self) -> None:
+            self.cleared = True
+
+    http = OwnedAsyncHTTP()
+    monkeypatch.setattr(urllib3, "AsyncPoolManager", lambda **_: http)
+
+    async def run() -> None:
+        client = AsyncClient()
+        await client.aclose()
+
+    asyncio.run(run())
+
+    assert http.cleared
