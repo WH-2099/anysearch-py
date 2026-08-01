@@ -28,7 +28,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Python and uv
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@v9.0.0
 
       - id: verify
         name: Verify tag matches pyproject.toml and main
@@ -74,13 +74,10 @@ jobs:
           persist-credentials: false
 
       - name: Setup Python and uv
-        uses: astral-sh/setup-uv@v8.2.0
-
-      - name: Setup just
-        uses: extractions/setup-just@v4
+        uses: astral-sh/setup-uv@v9.0.0
 
       - name: Build distributions
-        run: just build
+        run: uv build --no-create-gitignore --no-sources
 
       - name: Upload distributions
         uses: actions/upload-artifact@v7
@@ -128,7 +125,7 @@ jobs:
       - publish-github-draft
     environment:
       name: testpypi
-      url: https://test.pypi.org/project/graphon/${{ needs.verify-tag.outputs.version }}/
+      url: https://test.pypi.org/project/anysearch-py/${{ needs.verify-tag.outputs.version }}/
     permissions:
       id-token: write
     steps:
@@ -153,7 +150,7 @@ jobs:
       - publish-testpypi
     environment:
       name: pypi
-      url: https://pypi.org/project/graphon/${{ needs.verify-tag.outputs.version }}/
+      url: https://pypi.org/project/anysearch-py/${{ needs.verify-tag.outputs.version }}/
     permissions:
       contents: write
       id-token: write

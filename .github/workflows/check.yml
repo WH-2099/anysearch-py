@@ -7,15 +7,10 @@ permissions: {}
 
 jobs:
   check:
-    name: Check (Python ${{ matrix.python-version }})
+    name: Check
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version:
-          - "3.14"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -23,15 +18,10 @@ jobs:
           persist-credentials: false
 
       - name: Setup uv and Python
-        uses: astral-sh/setup-uv@v8.2.0
-        with:
-          python-version: ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v9.0.0
 
       - name: Setup just
         uses: extractions/setup-just@v4
 
       - name: Run checks
         run: just check
-
-      - name: Run tests
-        run: uv run pytest

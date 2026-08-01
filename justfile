@@ -22,6 +22,7 @@ check:
     uv run ruff format --check
     uv run ruff check
     uv run ty check src tests
+    uv run pytest
 
 build: check
     uv build --no-create-gitignore --no-sources
