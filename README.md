@@ -25,9 +25,9 @@ from anysearch_py import Client, SearchTag
 
 with Client(api_key="YOUR_ANYSEARCH_API_KEY") as client:
     response = client.search(
-        "Go 1.26 release notes",
+        "Python 3.15 new features",
         tag=SearchTag.CODE_DOC,
-        params={"library": "golang"},
+        params={"library": "python"},
     )
 
 print(response.data.results[0].url)
@@ -43,7 +43,7 @@ from anysearch_py import AsyncClient
 
 async def main() -> None:
     async with AsyncClient(api_key="YOUR_ANYSEARCH_API_KEY") as client:
-        response = await client.search("what is quantum computing")
+        response = await client.search("Python 3.15 new features")
 
     print(response.data.results[0].url)
 
@@ -65,20 +65,10 @@ print(markdown)
 ## MCP Search
 
 ```python
-from anysearch_py import Domain, MCPClient
+from anysearch_py import MCPClient
 
 with MCPClient(api_key="YOUR_ANYSEARCH_API_KEY") as client:
-    markdown = client.search(
-        "AAPL",
-        domain=Domain.FINANCE,
-        sub_domain="finance.quote",
-        sub_domain_params={
-            "type": "stock",
-            "symbol": "AAPL",
-            "cn_code": "",
-        },
-        max_results=5,
-    )
+    markdown = client.search("Python 3.15 new features", max_results=5)
 
 print(markdown)
 ```
