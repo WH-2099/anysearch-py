@@ -167,7 +167,7 @@ class SearchRequest(StrictRequestModel):
     @classmethod
     def from_input(
         cls,
-        query: Self | str,
+        query: SearchRequest | str,
         *,
         max_results: int | None = None,
         tag: SearchTag | str | None = None,
@@ -175,7 +175,7 @@ class SearchRequest(StrictRequestModel):
         language: str | None = None,
         params: Mapping[str, JsonValue] | None = None,
         output_format: OutputFormat | str | None = None,
-    ) -> Self:
+    ) -> SearchRequest:
         modifiers = {
             key: value
             for key, value in {
@@ -338,16 +338,34 @@ class SearchArguments(MCPArguments):
 
     @classmethod
     def from_input(
-        cls, arguments: SearchArguments | str | Mapping[str, Any], **kwargs: Any
+        cls,
+        arguments: SearchArguments | str | Mapping[str, Any],
+        *,
+        domain: Domain | str | None = None,
+        sub_domain: str | None = None,
+        sub_domain_params: Mapping[str, JsonValue] | None = None,
+        max_results: int | None = None,
     ) -> SearchArguments:
+        modifiers = {
+            key: value
+            for key, value in {
+                "domain": domain,
+                "sub_domain": sub_domain,
+                "sub_domain_params": (
+                    dict(sub_domain_params) if sub_domain_params is not None else None
+                ),
+                "max_results": max_results,
+            }.items()
+            if value is not None
+        }
         if isinstance(arguments, SearchArguments):
-            if kwargs:
+            if modifiers:
                 msg = "keyword arguments cannot be combined with SearchArguments"
                 raise ValueError(msg)
             return arguments
         if isinstance(arguments, str):
-            return cls.model_validate({"query": arguments, **kwargs})
-        return cls.model_validate({**dict(arguments), **kwargs})
+            return cls.model_validate({"query": arguments, **modifiers})
+        return cls.model_validate({**dict(arguments), **modifiers})
 
     @model_validator(mode="after")
     def validate_vertical_shape(self) -> Self:

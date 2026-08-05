@@ -267,8 +267,24 @@ class MCPClient(_SyncHTTPClient):
 
     _mcp_client = MCP_CLIENT
 
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        base_url: str = API_BASE_URL,
+        timeout: Timeout = DEFAULT_TIMEOUT,
+        retries: Retry | bool | int = DEFAULT_RETRIES,
+        user_agent: str = USER_AGENT,
+        http: Any | None = None,
+    ) -> None:
+        super().__init__(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=timeout,
+            retries=retries,
+            user_agent=user_agent,
+            http=http,
+        )
         self.ids = count(1)
 
     def call_tool(
@@ -287,9 +303,19 @@ class MCPClient(_SyncHTTPClient):
     def search(
         self,
         query: SearchArguments | str | Mapping[str, Any],
-        **kwargs: Any,
+        *,
+        domain: Domain | str | None = None,
+        sub_domain: str | None = None,
+        sub_domain_params: Mapping[str, JsonValue] | None = None,
+        max_results: int | None = None,
     ) -> str:
-        args = SearchArguments.from_input(query, **kwargs)
+        args = SearchArguments.from_input(
+            query,
+            domain=domain,
+            sub_domain=sub_domain,
+            sub_domain_params=sub_domain_params,
+            max_results=max_results,
+        )
         return self.call_tool(args).text
 
     def batch_search(
@@ -353,8 +379,24 @@ class AsyncMCPClient(_AsyncHTTPClient):
 
     _mcp_client = MCP_CLIENT
 
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        base_url: str = API_BASE_URL,
+        timeout: Timeout = DEFAULT_TIMEOUT,
+        retries: Retry | bool | int = DEFAULT_RETRIES,
+        user_agent: str = USER_AGENT,
+        http: Any | None = None,
+    ) -> None:
+        super().__init__(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=timeout,
+            retries=retries,
+            user_agent=user_agent,
+            http=http,
+        )
         self.ids = count(1)
 
     async def call_tool(
@@ -373,9 +415,19 @@ class AsyncMCPClient(_AsyncHTTPClient):
     async def search(
         self,
         query: SearchArguments | str | Mapping[str, Any],
-        **kwargs: Any,
+        *,
+        domain: Domain | str | None = None,
+        sub_domain: str | None = None,
+        sub_domain_params: Mapping[str, JsonValue] | None = None,
+        max_results: int | None = None,
     ) -> str:
-        args = SearchArguments.from_input(query, **kwargs)
+        args = SearchArguments.from_input(
+            query,
+            domain=domain,
+            sub_domain=sub_domain,
+            sub_domain_params=sub_domain_params,
+            max_results=max_results,
+        )
         result = await self.call_tool(args)
         return result.text
 
