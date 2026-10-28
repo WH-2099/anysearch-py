@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-import asyncio
-from collections.abc import Callable
+import socket
 from importlib.metadata import version
+from threading import Event
 from typing import Any
 
 import pytest
 import urllib3
+from pydantic import ValidationError
+from pytest_httpserver import HTTPServer
 from urllib3.exceptions import NewConnectionError, ReadTimeoutError
+from urllib3.util import Timeout
+from werkzeug.wrappers import Request, Response
 
 from anysearch_py import (
     APIError,
@@ -18,383 +22,557 @@ from anysearch_py import (
     Domain,
     ExtractRequest,
     HTTPStatusError,
+    JSONRPCError,
     MCPClient,
+    MCPToolCall,
     ResponseDecodeError,
     ResponseValidationError,
     ScoreArguments,
     ScoreFeedback,
     SearchArguments,
     SearchRequest,
-    SearchResponse,
     SearchTag,
     TransportError,
 )
 from anysearch_py.client import DEFAULT_RETRIES
-
-
-class FakeResponse:
-    def __init__(
-        self,
-        payload: object,
-        *,
-        status: int = 200,
-        headers: dict[str, str] | None = None,
-        data: bytes = b"not-json",
-    ) -> None:
-        self.payload = payload
-        self.status = status
-        self.headers = headers or {}
-        self.data = data
-
-    def json(self) -> object:
-        if isinstance(self.payload, BaseException):
-            raise self.payload
-        return self.payload
-
-
-class FakeHTTP:
-    def __init__(self, response: FakeResponse) -> None:
-        self.response = response
-        self.calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-
-    def request(self, *args: Any, **kwargs: Any) -> FakeResponse:
-        self.calls.append((args, kwargs))
-        return self.response
-
-    def __bool__(self) -> bool:
-        return False
-
-
-class AsyncFakeResponse:
-    def __init__(
-        self,
-        payload: object,
-        *,
-        status: int = 200,
-        headers: dict[str, str] | None = None,
-        data: bytes = b"not-json",
-    ) -> None:
-        self.payload = payload
-        self.status = status
-        self.headers = headers or {}
-        self._data = data
-
-    @property
-    async def data(self) -> bytes:
-        return self._data
-
-    async def json(self) -> object:
-        if isinstance(self.payload, BaseException):
-            raise self.payload
-        return self.payload
-
-
-class AsyncFakeHTTP:
-    def __init__(self, response: AsyncFakeResponse) -> None:
-        self.response = response
-        self.calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-
-    async def request(self, *args: Any, **kwargs: Any) -> AsyncFakeResponse:
-        self.calls.append((args, kwargs))
-        return self.response
-
-    def __bool__(self) -> bool:
-        return False
-
-
-def search_payload() -> dict[str, object]:
-    return {
-        "code": 0,
-        "message": "success",
-        "request_id": "req-1",
-        "data": {
-            "results": [
-                {
-                    "title": "Go 1.26 Release Notes",
-                    "url": "https://go.dev/doc/go1.26",
-                    "snippet": "Go 1.26 is a major release...",
-                },
-            ],
-            "metadata": {
-                "total_results": 1,
-                "search_time_ms": 946,
-            },
-        },
-    }
-
-
-def mcp_payload(text: str, *, request_id: int = 1) -> dict[str, object]:
-    return {
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "result": {
-            "content": [
-                {
-                    "type": "text",
-                    "text": text,
-                },
-            ],
-        },
-    }
-
-
-def call_rest_with_string(client: Client) -> SearchResponse:
-    return client.search(
-        "Go 1.26 release notes",
-        tag=SearchTag.CODE_DOC,
-        params={"library": "golang"},
-    )
-
-
-def call_rest_with_model(client: Client) -> SearchResponse:
-    return client.search(
-        SearchRequest(query="Python docs", max_results=3, language="en-US")
-    )
+from tests.support import (
+    EXTRACT_URL,
+    AnyClient,
+    mcp_payload,
+    opened_client,
+    resolve,
+    sample,
+)
 
 
 @pytest.mark.parametrize(
-    ("caller", "expected_json"),
+    ("query", "options", "payload"),
     [
-        pytest.param(
-            call_rest_with_string,
+        (
+            "  pytest 文档  ",
             {
-                "query": "Go 1.26 release notes",
-                "max_results": 10,
+                "max_results": 1,
+                "tag": SearchTag.CODE_DOC,
+                "zone": "intl",
+                "language": "zh-Hans-CN",
+                "params": {"library": "pytest", "code": "  indented\n"},
+                "output_format": "markdown",
+            },
+            {
+                "query": "pytest 文档",
+                "max_results": 1,
                 "tag": "code.doc",
-                "params": {"library": "golang"},
-                "format": "json",
+                "zone": "intl",
+                "language": "zh-Hans-CN",
+                "params": {"library": "pytest", "code": "  indented\n"},
+                "format": "markdown",
             },
-            id="string-request",
         ),
-        pytest.param(
-            call_rest_with_model,
-            {
-                "query": "Python docs",
-                "max_results": 3,
-                "language": "en-US",
-                "format": "json",
-            },
-            id="model-request",
+        (
+            SearchRequest(query="pytest", max_results=10),
+            {},
+            {"query": "pytest", "max_results": 10, "format": "json"},
         ),
     ],
 )
-def test_rest_client_sends_search_payload_matrix(
-    caller: Callable[[Client], SearchResponse],
-    expected_json: dict[str, object],
+async def test_rest_search(
+    rest_client: Client | AsyncClient,
+    server: HTTPServer,
+    query: str | SearchRequest,
+    options: dict[str, Any],
+    payload: dict[str, Any],
 ) -> None:
-    http = FakeHTTP(FakeResponse(search_payload()))
-    client = Client(api_key="test-key", http=http)
+    server.expect_ordered_request(
+        "/v1/search", method="POST", json=payload
+    ).respond_with_json(sample("rest_search")["body"])
+    response = await resolve(rest_client.search(query, **options))
+    assert response.ok
+    assert response.data.results[0].url.host == "docs.pytest.org"
+    assert response.request_id == sample("rest_search")["body"]["request_id"]
 
-    response = caller(client)
 
-    assert response.request_id == "req-1"
-    assert response.data.metadata.total_results == 1
-
-    args, request_kwargs = http.calls[0]
-    assert args[:2] == ("POST", "https://api.anysearch.com/v1/search")
-    assert request_kwargs["headers"]["Authorization"] == "Bearer test-key"
-    assert request_kwargs["headers"]["User-Agent"] == (
-        f"anysearch-py/{version('anysearch-py')}"
+@pytest.mark.parametrize("as_model", [False, True])
+async def test_rest_extract(
+    rest_client: Client | AsyncClient, server: HTTPServer, as_model: bool
+) -> None:
+    server.expect_ordered_request(
+        "/v1/extract", method="POST", json={"url": EXTRACT_URL}
+    ).respond_with_json(sample("rest_extract")["body"])
+    response = await resolve(
+        rest_client.extract(
+            ExtractRequest(url=EXTRACT_URL) if as_model else EXTRACT_URL
+        )
     )
-    assert "X-Anysearch-Client" not in request_kwargs["headers"]
-    assert request_kwargs["json"] == expected_json
-
-
-def call_mcp_search(client: MCPClient) -> str:
-    return client.search(
-        "AAPL",
-        domain=Domain.FINANCE,
-        sub_domain="finance.quote",
-        sub_domain_params={"type": "stock", "symbol": "AAPL", "cn_code": ""},
-        max_results=5,
-    )
-
-
-def call_mcp_batch_search(client: MCPClient) -> str:
-    return client.batch_search(
-        [
-            "AAPL",
-            {
-                "query": "MSFT",
-                "sub_domain_params": {
-                    "type": "stock",
-                    "symbol": "MSFT",
-                    "cn_code": "",
-                },
-            },
-        ],
-        domain=Domain.FINANCE,
-        sub_domain="finance.quote",
-        sub_domain_params={"type": "stock", "symbol": "AAPL", "cn_code": ""},
-    )
-
-
-def call_mcp_get_sub_domains(client: MCPClient) -> str:
-    return client.get_sub_domains(domains=[Domain.FINANCE, Domain.HEALTH])
-
-
-def call_mcp_extract(client: MCPClient) -> str:
-    return client.extract("https://example.com/article")
+    assert str(response.data.url) == EXTRACT_URL
+    assert response.data.title == ""
+    assert response.data.content.startswith("# anysearch-py")
 
 
 @pytest.mark.parametrize(
-    ("caller", "tool_name", "expected_arguments"),
+    ("selectors", "query_string"),
     [
-        pytest.param(
-            call_mcp_search,
+        ({"domain": Domain.CODE}, "domain=code"),
+        (
+            {"domains": ["code", "finance", "code"]},
+            "domain=code&domain=finance&domain=code",
+        ),
+    ],
+)
+async def test_rest_domains(
+    rest_client: Client | AsyncClient,
+    server: HTTPServer,
+    selectors: dict[str, Any],
+    query_string: str,
+) -> None:
+    server.expect_ordered_request(
+        "/v1/sub-domains", method="GET", query_string=query_string
+    ).respond_with_json(sample("rest_domains")["body"])
+    response = await resolve(rest_client.get_sub_domains(**selectors))
+    assert response.ok
+    assert response.data.domains[0].sub_domains
+    assert server.log[0][0].data == b""
+
+
+@pytest.mark.parametrize(
+    ("method", "args", "kwargs", "tool", "arguments", "response_sample"),
+    [
+        (
+            "search",
+            ("pytest",),
+            {"max_results": 1},
+            "search",
+            {"query": "pytest", "max_results": 1},
+            "mcp_search",
+        ),
+        (
+            "search",
+            (SearchArguments(query="pytest"),),
+            {},
+            "search",
+            {"query": "pytest"},
+            "mcp_search",
+        ),
+        (
+            "search",
+            ({"query": "pytest", "max_results": 1},),
+            {},
+            "search",
+            {"query": "pytest", "max_results": 1},
+            "mcp_search",
+        ),
+        (
+            "search",
+            ("pytest",),
+            {
+                "domain": Domain.CODE,
+                "sub_domain": "code.doc",
+                "sub_domain_params": {"library": "pytest"},
+            },
             "search",
             {
-                "query": "AAPL",
-                "domain": "finance",
-                "sub_domain": "finance.quote",
-                "sub_domain_params": {
-                    "type": "stock",
-                    "symbol": "AAPL",
-                    "cn_code": "",
-                },
-                "max_results": 5,
+                "query": "pytest",
+                "domain": "code",
+                "sub_domain": "code.doc",
+                "sub_domain_params": {"library": "pytest"},
             },
-            id="search",
+            "mcp_search",
         ),
-        pytest.param(
-            call_mcp_batch_search,
+        (
+            "batch_search",
+            (["pytest", {"query": "hypothesis"}],),
+            {},
+            "batch_search",
+            {"queries": [{"query": "pytest"}, {"query": "hypothesis"}]},
+            "mcp_batch",
+        ),
+        (
+            "batch_search",
+            (BatchSearchArguments(queries=(SearchArguments(query="pytest"),)),),
+            {},
+            "batch_search",
+            {"queries": [{"query": "pytest"}]},
+            "mcp_batch",
+        ),
+        (
+            "batch_search",
+            (["pytest", SearchArguments(query="hypothesis")],),
+            {
+                "domain": "code",
+                "sub_domain": "code.doc",
+                "sub_domain_params": {"library": "pytest"},
+            },
             "batch_search",
             {
                 "queries": [
                     {
-                        "query": "AAPL",
-                        "domain": "finance",
-                        "sub_domain": "finance.quote",
-                        "sub_domain_params": {
-                            "type": "stock",
-                            "symbol": "AAPL",
-                            "cn_code": "",
-                        },
+                        "query": "pytest",
+                        "domain": "code",
+                        "sub_domain": "code.doc",
+                        "sub_domain_params": {"library": "pytest"},
                     },
                     {
-                        "query": "MSFT",
-                        "domain": "finance",
-                        "sub_domain": "finance.quote",
-                        "sub_domain_params": {
-                            "type": "stock",
-                            "symbol": "MSFT",
-                            "cn_code": "",
-                        },
+                        "query": "hypothesis",
+                        "domain": "code",
+                        "sub_domain": "code.doc",
+                        "sub_domain_params": {"library": "pytest"},
                     },
-                ],
+                ]
             },
-            id="batch-search",
+            "mcp_batch",
         ),
-        pytest.param(
-            call_mcp_get_sub_domains,
-            "get_sub_domains",
-            {"domains": ["finance", "health"]},
-            id="get-sub-domains",
-        ),
-        pytest.param(
-            call_mcp_extract,
+        (
             "extract",
-            {"url": "https://example.com/article"},
-            id="extract",
+            ("https://example.com",),
+            {},
+            "extract",
+            {"url": "https://example.com/"},
+            "mcp_extract",
+        ),
+        (
+            "get_sub_domains",
+            (),
+            {"domain": "code"},
+            "get_sub_domains",
+            {"domain": "code"},
+            "mcp_domains",
+        ),
+        (
+            "get_sub_domains",
+            (),
+            {"domains": ["code", "finance"]},
+            "get_sub_domains",
+            {"domains": ["code", "finance"]},
+            "mcp_domains",
+        ),
+        (
+            "score",
+            ([{"request_id": "search-id", "score": 5}],),
+            {},
+            "score",
+            {"feedbacks": [{"request_id": "search-id", "score": 5}]},
+            "mcp_score",
+        ),
+        (
+            "score",
+            (
+                ScoreArguments(
+                    feedbacks=(ScoreFeedback(request_id="search-id", score=5),)
+                ),
+            ),
+            {},
+            "score",
+            {"feedbacks": [{"request_id": "search-id", "score": 5}]},
+            "mcp_score",
         ),
     ],
+    ids=[
+        "search-string",
+        "search-model",
+        "search-mapping",
+        "search-vertical",
+        "batch-mixed",
+        "batch-model",
+        "batch-shared",
+        "extract",
+        "domain",
+        "domains",
+        "score-mapping",
+        "score-model",
+    ],
 )
-def test_mcp_client_sends_tool_call_payload_matrix(
-    caller: Callable[[MCPClient], str],
-    tool_name: str,
-    expected_arguments: dict[str, object],
+async def test_mcp_methods(
+    mcp_client: MCPClient | AsyncMCPClient,
+    server: HTTPServer,
+    method: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    tool: str,
+    arguments: dict[str, Any],
+    response_sample: str,
 ) -> None:
-    http = FakeHTTP(FakeResponse(mcp_payload("ok")))
-    client = MCPClient(api_key="test-key", http=http)
-
-    assert caller(client) == "ok"
-
-    args, request_kwargs = http.calls[0]
-    assert args[:2] == ("POST", "https://api.anysearch.com/mcp")
-    assert request_kwargs["headers"]["Authorization"] == "Bearer test-key"
-    assert request_kwargs["headers"]["X-Anysearch-Client"] == "mcp/1.0.0"
-    assert request_kwargs["json"] == {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "tools/call",
-        "params": {
-            "name": tool_name,
-            "arguments": expected_arguments,
+    body = mcp_payload(response_sample)
+    server.expect_ordered_request(
+        "/mcp",
+        method="POST",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": arguments},
         },
-    }
+    ).respond_with_json(body)
+    text = await resolve(getattr(mcp_client, method)(*args, **kwargs))
+    assert text == "\n\n".join(block["text"] for block in body["result"]["content"])
 
 
 @pytest.mark.parametrize(
-    ("response", "expected_type", "expected_code", "expected_request_id"),
-    [
-        (
-            FakeResponse(
-                {
-                    "code": -1,
-                    "message": "Missing required params",
-                    "data": {"quota_remaining": 0},
+    "tool",
+    ["extract", MCPToolCall(name="extract", arguments={"url": "https://example.com"})],
+)
+async def test_call_tool_preserves_metadata_and_increments_ids(
+    mcp_client: MCPClient | AsyncMCPClient, server: HTTPServer, tool: str | MCPToolCall
+) -> None:
+    for request_id in (1, 2):
+        server.expect_ordered_request(
+            "/mcp",
+            method="POST",
+            json={
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "tools/call",
+                "params": {
+                    "name": "extract",
+                    "arguments": {"url": "https://example.com"},
                 },
-                headers={"X-Request-ID": "req-err"},
-            ),
-            APIError,
-            -1,
-            "req-err",
-        ),
-        (
-            FakeResponse(
-                {"error": "Bad request", "symbol": "BAD_REQUEST"},
-                status=400,
-                headers={"x-request-id": "http-err"},
-            ),
-            HTTPStatusError,
-            "BAD_REQUEST",
-            "http-err",
-        ),
-        (
-            FakeResponse(ValueError("bad json")),
-            ResponseDecodeError,
-            None,
-            None,
-        ),
+            },
+        ).respond_with_json(mcp_payload("mcp_extract", request_id))
+        result = await resolve(
+            mcp_client.call_tool(
+                tool, {"url": "https://example.com"} if isinstance(tool, str) else None
+            )
+        )
+        assert (
+            result.structured_content
+            == sample("mcp_extract")["body"]["result"]["structuredContent"]
+        )
+        assert result.meta == sample("mcp_extract")["body"]["result"]["_meta"]
+
+
+async def test_headers_and_base_url(
+    transport_client: AnyClient, server: HTTPServer, api_key: str | None
+) -> None:
+    transport_client.base_url = server.url_for("/prefix///")
+    transport_client.user_agent = f"anysearch-test/{version('anysearch-py')}"
+    server.expect_ordered_request("/prefix/check", method="GET").respond_with_json({
+        "ok": True
+    })
+    assert await resolve(transport_client.request_json("GET", "///check")) == {
+        "ok": True
+    }
+    headers = server.log[0][0].headers
+    assert headers.get("Authorization") == (f"Bearer {api_key}" if api_key else None)
+    assert headers["User-Agent"] == transport_client.user_agent
+    assert headers["Accept"] == "application/json"
+    assert headers["Content-Type"] == "application/json"
+    expected_mcp = (
+        "mcp/1.0.0"
+        if isinstance(transport_client, MCPClient | AsyncMCPClient)
+        else None
+    )
+    assert headers.get("X-Anysearch-Client") == expected_mcp
+    assert api_key is None or api_key not in repr(transport_client)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "rest_missing_query",
+        "rest_invalid_url",
+        "rest_missing_domains",
+        "rest_invalid_auth",
     ],
 )
-def test_rest_client_raises_typed_errors(
-    response: FakeResponse,
-    expected_type: type[Exception],
-    expected_code: int | str | None,
-    expected_request_id: str | None,
+async def test_recorded_http_errors(
+    transport_client: AnyClient, server: HTTPServer, name: str
 ) -> None:
-    client = Client(http=FakeHTTP(response))
-
-    with pytest.raises(expected_type) as caught:
-        client.search("Go")
-
-    assert getattr(caught.value, "code", None) == expected_code
-    assert getattr(caught.value, "request_id", None) == expected_request_id
-
-
-def test_non_json_http_errors_preserve_http_metadata() -> None:
-    response = FakeResponse(
-        ValueError("bad json"),
-        status=503,
-        headers={"Retry-After": "30", "X-Request-ID": "req-http"},
-        data=b"<html>unavailable</html>",
+    recorded = sample(name)
+    server.expect_ordered_request("/error").respond_with_json(
+        recorded["body"], status=recorded["status"], headers=recorded["headers"]
     )
-
     with pytest.raises(HTTPStatusError) as caught:
-        Client(http=FakeHTTP(response)).search("Go")
+        await resolve(transport_client.request_json("POST", "/error"))
+    error = caught.value
+    assert error.status == recorded["status"]
+    assert error.code == recorded["body"]["code"]
+    assert error.error_code == recorded["body"].get("error_code")
+    assert error.request_id == recorded["body"]["request_id"]
+    assert str(error) == recorded["body"]["message"]
 
-    assert caught.value.status == 503
-    assert caught.value.request_id == "req-http"
-    assert caught.value.headers["Retry-After"] == "30"
+
+@pytest.mark.parametrize("status", [302, 429, 500, 503])
+async def test_http_failures_are_not_replayed(
+    transport_client: AnyClient, server: HTTPServer, status: int
+) -> None:
+    server.expect_request("/failure", method="POST").respond_with_data(
+        "<html>unavailable</html>",
+        status=status,
+        headers={
+            "Retry-After": "0",
+            "X-Request-ID": "http-error",
+            "Location": server.url_for("/unexpected"),
+        },
+    )
+    with pytest.raises(HTTPStatusError) as caught:
+        await resolve(transport_client.request_json("POST", "/failure"))
+    assert caught.value.status == status
+    assert caught.value.request_id == "http-error"
+    assert caught.value.headers["Retry-After"] == "0"
     assert caught.value.data == "<html>unavailable</html>"
+    assert len(server.log) == 1
 
 
-def test_successful_non_json_response_preserves_raw_body() -> None:
+@pytest.mark.parametrize("raw", [b"not-json", b"", b"\xff"])
+async def test_invalid_json_preserves_bytes(
+    transport_client: AnyClient, server: HTTPServer, raw: bytes
+) -> None:
+    server.expect_ordered_request("/invalid").respond_with_data(raw)
     with pytest.raises(ResponseDecodeError) as caught:
-        Client(http=FakeHTTP(FakeResponse(ValueError("bad json")))).search("Go")
+        await resolve(transport_client.request_json("GET", "/invalid"))
+    assert caught.value.raw == raw
+    assert isinstance(caught.value.__cause__, ValueError)
 
-    assert caught.value.raw == b"not-json"
+
+@pytest.mark.parametrize("body_id", [None, "", "body-id"])
+async def test_rest_business_error_uses_request_id(
+    rest_client: Client | AsyncClient, server: HTTPServer, body_id: str | None
+) -> None:
+    payload = {"code": -1, "message": "No quota", "data": {"quota_remaining": 0}}
+    if body_id is not None:
+        payload["request_id"] = body_id
+    server.expect_ordered_request("/v1/search").respond_with_json(
+        payload, headers={"x-request-id": "header-id"}
+    )
+    with pytest.raises(APIError) as caught:
+        await resolve(rest_client.search("pytest"))
+    assert type(caught.value) is APIError
+    assert caught.value.request_id == (body_id or "header-id")
+    assert caught.value.data == {"quota_remaining": 0}
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "mcp_unknown_tool",
+        "mcp_missing_query",
+        "mcp_invalid_url",
+        "mcp_empty_batch",
+        "mcp_invalid_batch",
+        "mcp_missing_domains",
+        "mcp_empty_score",
+        "mcp_invalid_auth",
+    ],
+)
+async def test_recorded_mcp_errors_keep_request_id(
+    mcp_client: MCPClient | AsyncMCPClient, server: HTTPServer, name: str
+) -> None:
+    payload = mcp_payload(name)
+    server.expect_ordered_request("/mcp").respond_with_json(
+        payload, headers={"X-Request-ID": "header-id"}
+    )
+    with pytest.raises(JSONRPCError) as caught:
+        await resolve(mcp_client.call_tool("search", {}))
+    expected_id = (
+        payload.get("result", {}).get("_meta", {}).get("request_id", "header-id")
+    )
+    assert caught.value.request_id == expected_id
+    assert caught.value.code == payload.get("error", {}).get("code")
+
+
+async def test_mcp_rejects_mismatched_response_id(
+    mcp_client: MCPClient | AsyncMCPClient, server: HTTPServer
+) -> None:
+    server.expect_ordered_request("/mcp").respond_with_json(
+        mcp_payload("mcp_search", 2)
+    )
+    with pytest.raises(ResponseValidationError, match="id"):
+        await resolve(mcp_client.search("pytest"))
+
+
+@pytest.mark.parametrize("query", [" ", SearchRequest(query="pytest")])
+async def test_invalid_rest_arguments_fail_before_network(
+    rest_client: Client | AsyncClient, server: HTTPServer, query: str | SearchRequest
+) -> None:
+    with pytest.raises(ValueError, match=r"max_results|SearchRequest"):
+        await resolve(rest_client.search(query, max_results=0))
+    assert not server.log
+
+
+@pytest.mark.parametrize(
+    ("method", "args", "kwargs", "error"),
+    [
+        ("search", (SearchArguments(query="pytest"),), {"max_results": 1}, ValueError),
+        ("batch_search", ("abc",), {}, TypeError),
+        (
+            "batch_search",
+            (BatchSearchArguments(queries=(SearchArguments(query="pytest"),)),),
+            {"domain": Domain.GENERAL},
+            ValueError,
+        ),
+        ("score", ([],), {}, ValidationError),
+        ("get_sub_domains", (), {}, ValidationError),
+        ("extract", ("ftp://example.com",), {}, ValidationError),
+    ],
+)
+async def test_invalid_mcp_arguments_fail_before_network(
+    mcp_client: MCPClient | AsyncMCPClient,
+    server: HTTPServer,
+    method: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    error: type[Exception],
+) -> None:
+    with pytest.raises(error):
+        await resolve(getattr(mcp_client, method)(*args, **kwargs))
+    assert not server.log
+
+
+async def test_connection_errors_preserve_cause(transport_client: AnyClient) -> None:
+    with socket.socket() as unused_port:
+        unused_port.bind(("127.0.0.1", 0))
+        transport_client.base_url = f"http://127.0.0.1:{unused_port.getsockname()[1]}"
+        with pytest.raises(TransportError) as caught:
+            await resolve(transport_client.request_json("POST", "/unreachable"))
+    assert isinstance(caught.value.__cause__, urllib3.exceptions.HTTPError)
+
+
+async def test_read_timeouts_are_not_replayed(transport_client: AnyClient) -> None:
+    release = Event()
+    attempts: list[str] = []
+
+    def blocked(request: Request) -> Response:
+        attempts.append(request.path)
+        release.wait(timeout=2)
+        return Response("{}", content_type="application/json")
+
+    with HTTPServer(threaded=True) as server:
+        server.expect_request("/slow").respond_with_handler(blocked)
+        transport_client.base_url = server.url_for("/")
+        transport_client.http.connection_pool_kw["timeout"] = Timeout(
+            connect=1, read=0.02
+        )
+        try:
+            with pytest.raises(TransportError) as caught:
+                await resolve(transport_client.request_json("POST", "/slow"))
+            assert isinstance(caught.value.__cause__, ReadTimeoutError)
+            assert attempts == ["/slow"]
+        finally:
+            release.set()
+        server.check()
+
+
+@pytest.mark.parametrize(
+    "client_type", [Client, AsyncClient, MCPClient, AsyncMCPClient]
+)
+@pytest.mark.parametrize("external", [False, True])
+async def test_context_manager_closes_only_owned_pools(
+    client_type: type[AnyClient], server: HTTPServer, external: bool
+) -> None:
+    asynchronous = client_type in {AsyncClient, AsyncMCPClient}
+    pool = (
+        (urllib3.AsyncPoolManager() if asynchronous else urllib3.PoolManager())
+        if external
+        else None
+    )
+    client = client_type(base_url=server.url_for("/"), http=pool)
+    server.expect_request("/pool").respond_with_json({})
+    try:
+        async with opened_client(client):
+            await resolve(client.request_json("GET", "/pool"))
+            assert len(client.http.pools) == 1
+        assert len(client.http.pools) == (1 if external else 0)
+    finally:
+        if pool is not None:
+            await resolve(pool.clear())
 
 
 def test_default_retries_only_retry_connection_failures() -> None:
@@ -402,345 +580,16 @@ def test_default_retries_only_retry_connection_failures() -> None:
     assert DEFAULT_RETRIES.redirect == 0
     assert DEFAULT_RETRIES.status == 0
     assert DEFAULT_RETRIES.other == 0
-    assert not DEFAULT_RETRIES.is_retry("POST", 500)
-    assert not DEFAULT_RETRIES.is_retry("POST", 503, has_retry_after=True)
-    assert not DEFAULT_RETRIES.is_retry("POST", 429, has_retry_after=True)
-
-    pool = urllib3.HTTPConnectionPool("api.anysearch.com")
-    after_connect = DEFAULT_RETRIES.increment(
-        method="POST",
-        url="https://api.anysearch.com/v1/search",
-        error=NewConnectionError(pool, "connection failed"),
-    )
-    assert after_connect.connect == 1
-
-    with pytest.raises(ReadTimeoutError):
-        DEFAULT_RETRIES.increment(
+    with urllib3.HTTPConnectionPool("localhost") as pool:
+        retry = DEFAULT_RETRIES.increment(
             method="POST",
-            url="https://api.anysearch.com/v1/search",
-            error=ReadTimeoutError(pool, "/v1/search", "read timed out"),
+            url="/search",
+            error=NewConnectionError(pool, "connection failed"),
         )
-
-
-def test_client_repr_does_not_expose_api_key() -> None:
-    assert "super-secret" not in repr(
-        Client(api_key="super-secret", http=FakeHTTP(FakeResponse(search_payload())))
-    )
-
-
-def test_prebuilt_requests_reject_ignored_modifiers() -> None:
-    http = FakeHTTP(FakeResponse(search_payload()))
-    request = SearchRequest(query="Go", max_results=2)
-    batch = BatchSearchArguments(queries=(SearchArguments(query="Go"),))
-    client = Client(http=http)
-    mcp_client = MCPClient(http=http)
-
-    with pytest.raises(ValueError, match="SearchRequest"):
-        client.search(request, max_results=10)
-    with pytest.raises(ValueError, match="BatchSearchArguments"):
-        mcp_client.batch_search(batch, domain=Domain.GENERAL)
-    with pytest.raises(TypeError, match="sequence"):
-        mcp_client.batch_search("abc")
-
-    async def run() -> None:
-        async_http = AsyncFakeHTTP(AsyncFakeResponse(search_payload()))
-        async_client = AsyncClient(http=async_http)
-        async_mcp_client = AsyncMCPClient(http=async_http)
-
-        with pytest.raises(ValueError, match="SearchRequest"):
-            await async_client.search(request, max_results=10)
-        with pytest.raises(ValueError, match="BatchSearchArguments"):
-            await async_mcp_client.batch_search(batch, domain=Domain.GENERAL)
-        with pytest.raises(TypeError, match="sequence"):
-            await async_mcp_client.batch_search("abc")
-
-        assert not async_http.calls
-
-    asyncio.run(run())
-
-    assert not http.calls
-
-
-def test_async_clients_use_same_payload_shapes() -> None:
-    async def run() -> tuple[
-        str | None, str, list[tuple[tuple[Any, ...], dict[str, Any]]]
-    ]:
-        rest_http = AsyncFakeHTTP(AsyncFakeResponse(search_payload()))
-        mcp_http = AsyncFakeHTTP(AsyncFakeResponse(mcp_payload("mcp ok")))
-
-        rest_response = await AsyncClient(http=rest_http).search(
-            SearchRequest(query="hello")
-        )
-        mcp_text = await AsyncMCPClient(http=mcp_http).search("hello")
-
-        return (
-            rest_response.data.results[0].snippet,
-            mcp_text,
-            rest_http.calls + mcp_http.calls,
-        )
-
-    snippet, mcp_text, calls = asyncio.run(run())
-
-    assert snippet == "Go 1.26 is a major release..."
-    assert mcp_text == "mcp ok"
-    assert calls[0][0][:2] == ("POST", "https://api.anysearch.com/v1/search")
-    assert calls[1][0][:2] == ("POST", "https://api.anysearch.com/mcp")
-    assert calls[1][1]["headers"]["X-Anysearch-Client"] == "mcp/1.0.0"
-
-
-def test_mcp_clients_reject_mismatched_response_ids() -> None:
-    with pytest.raises(ResponseValidationError, match="id"):
-        MCPClient(
-            http=FakeHTTP(FakeResponse(mcp_payload("wrong", request_id=2)))
-        ).search("hello")
-
-    async def run() -> None:
-        client = AsyncMCPClient(
-            http=AsyncFakeHTTP(AsyncFakeResponse(mcp_payload("wrong", request_id=2)))
-        )
-        with pytest.raises(ResponseValidationError, match="id"):
-            await client.search("hello")
-
-    asyncio.run(run())
-
-
-def test_async_non_json_responses_preserve_error_semantics() -> None:
-    async def run() -> tuple[HTTPStatusError, ResponseDecodeError, APIError]:
-        error_response = AsyncFakeResponse(
-            ValueError("bad json"),
-            status=503,
-            headers={"Retry-After": "30", "x-request-id": "req-async"},
-            data=b"<html>unavailable</html>",
-        )
-        decode_response = AsyncFakeResponse(
-            ValueError("bad json"),
-            data=b"not-json-async",
-        )
-        api_response = AsyncFakeResponse(
-            {"code": -1, "message": "bad request", "data": None},
-            headers={"x-request-id": "req-api"},
-        )
-
-        with pytest.raises(HTTPStatusError) as http_error:
-            await AsyncClient(http=AsyncFakeHTTP(error_response)).search("Go")
-        with pytest.raises(ResponseDecodeError) as decode_error:
-            await AsyncClient(http=AsyncFakeHTTP(decode_response)).search("Go")
-        with pytest.raises(APIError) as api_error:
-            await AsyncClient(http=AsyncFakeHTTP(api_response)).search("Go")
-        return http_error.value, decode_error.value, api_error.value
-
-    http_error, decode_error, api_error = asyncio.run(run())
-
-    assert http_error.status == 503
-    assert http_error.request_id == "req-async"
-    assert http_error.data == "<html>unavailable</html>"
-    assert decode_error.raw == b"not-json-async"
-    assert api_error.request_id == "req-api"
-
-
-def test_transport_errors_are_wrapped() -> None:
-    class FailingHTTP:
-        def request(self, *_: Any, **__: Any) -> None:
-            raise urllib3.exceptions.HTTPError
-
-    class AsyncFailingHTTP:
-        async def request(self, *_: Any, **__: Any) -> None:
-            raise urllib3.exceptions.HTTPError
-
-    with pytest.raises(TransportError) as sync_error:
-        Client(http=FailingHTTP()).search("hello")
-
-    async def run() -> TransportError:
-        with pytest.raises(TransportError) as async_error:
-            await AsyncClient(http=AsyncFailingHTTP()).search("hello")
-        return async_error.value
-
-    async_error = asyncio.run(run())
-
-    assert isinstance(sync_error.value.__cause__, urllib3.exceptions.HTTPError)
-    assert isinstance(async_error.__cause__, urllib3.exceptions.HTTPError)
-
-
-def test_async_client_awaits_owned_pool_clear(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class OwnedAsyncHTTP:
-        cleared = False
-
-        async def clear(self) -> None:
-            self.cleared = True
-
-    http = OwnedAsyncHTTP()
-    monkeypatch.setattr(urllib3, "AsyncPoolManager", lambda **_: http)
-
-    async def run() -> None:
-        client = AsyncClient()
-        await client.aclose()
-
-    asyncio.run(run())
-
-    assert http.cleared
-
-
-@pytest.mark.parametrize(
-    "url",
-    ["https://example.com/article", ExtractRequest(url="https://example.com/article")],
-)
-def test_rest_extract_clients_send_and_parse_documented_payload(
-    url: ExtractRequest | str,
-) -> None:
-    payload = {
-        "code": 0,
-        "message": "success",
-        "data": {
-            "url": "https://example.com/article",
-            "title": "Example Article",
-            "content": "# Extracted content",
-        },
-    }
-    http = FakeHTTP(FakeResponse(payload, headers={"X-Request-ID": "req-extract"}))
-    async_http = AsyncFakeHTTP(
-        AsyncFakeResponse(payload, headers={"X-Request-ID": "req-extract"})
-    )
-
-    response = Client(http=http).extract(url)
-    async_response = asyncio.run(AsyncClient(http=async_http).extract(url))
-
-    assert response == async_response
-    assert response.data.title == "Example Article"
-    assert response.data.content == "# Extracted content"
-    assert response.request_id == "req-extract"
-    assert http.calls == async_http.calls
-    args, kwargs = http.calls[0]
-    assert args == ("POST", "https://api.anysearch.com/v1/extract")
-    assert kwargs["json"] == {"url": "https://example.com/article"}
-
-
-@pytest.mark.parametrize(
-    ("selectors", "fields"),
-    [
-        ({"domain": Domain.CODE}, [("domain", "code")]),
-        (
-            {"domains": [Domain.CODE, "finance", "code"]},
-            [("domain", "code"), ("domain", "finance"), ("domain", "code")],
-        ),
-        ({"domain": "unknown"}, [("domain", "unknown")]),
-    ],
-)
-def test_rest_domain_clients_use_repeated_get_parameters(
-    selectors: dict[str, Any], fields: list[tuple[str, str]]
-) -> None:
-    domains = (
-        []
-        if selectors.get("domain") == "unknown"
-        else [
-            {
-                "domain": "code",
-                "description": "Developer documentation and code search",
-                "sub_domains": [
-                    {
-                        "sub_domain": "code.doc",
-                        "description": "Documentation",
-                        "params": {
-                            "library": {
-                                "description": "Library name",
-                                "required": True,
-                                "sort_order": 0,
-                            }
-                        },
-                    },
-                    {"sub_domain": "code.snippet", "description": "Code search"},
-                ],
-            }
-        ]
-    )
-    payload = {"code": 0, "message": "success", "data": {"domains": domains}}
-    http = FakeHTTP(FakeResponse(payload))
-    async_http = AsyncFakeHTTP(AsyncFakeResponse(payload))
-
-    response = Client(http=http).get_sub_domains(**selectors)
-    async_response = asyncio.run(
-        AsyncClient(http=async_http).get_sub_domains(**selectors)
-    )
-
-    assert response == async_response
-    assert http.calls == async_http.calls
-    args, kwargs = http.calls[0]
-    assert args == ("GET", "https://api.anysearch.com/v1/sub-domains")
-    assert kwargs["fields"] == fields
-    assert kwargs["json"] is None
-    if domains:
-        capabilities = response.data.domains[0]
-        assert capabilities.sub_domains[0].params["library"].required
-        assert capabilities.sub_domains[1].params == {}
-    else:
-        assert not response.data.domains
-
-
-@pytest.mark.parametrize(
-    ("method", "arguments"),
-    [
-        ("search", {"query": "hello"}),
-        ("extract", {"url": "https://example.com/article"}),
-        ("get_sub_domains", {"domain": "code"}),
-    ],
-)
-@pytest.mark.parametrize("status", [200, 400])
-def test_rest_clients_preserve_stable_error_codes(
-    method: str, arguments: dict[str, str], status: int
-) -> None:
-    payload = {
-        "code": -1,
-        "message": "Invalid request",
-        "error_code": "invalid_extract_url",
-    }
-    headers = {"X-Request-ID": "req-error"}
-    http = FakeHTTP(FakeResponse(payload, status=status, headers=headers))
-    async_http = AsyncFakeHTTP(
-        AsyncFakeResponse(payload, status=status, headers=headers)
-    )
-    error_type = APIError if status == 200 else HTTPStatusError
-
-    with pytest.raises(error_type) as sync_error:
-        getattr(Client(http=http), method)(**arguments)
-    with pytest.raises(error_type) as async_error:
-        asyncio.run(getattr(AsyncClient(http=async_http), method)(**arguments))
-
-    for error in (sync_error.value, async_error.value):
-        assert error.code == -1
-        assert error.error_code == "invalid_extract_url"
-        assert error.request_id == "req-error"
-
-
-@pytest.mark.parametrize(
-    "feedbacks",
-    [
-        [{"request_id": "req-search", "score": 5}],
-        ScoreArguments(feedbacks=(ScoreFeedback(request_id="req-search", score=5),)),
-    ],
-)
-def test_mcp_score_clients_send_validated_feedback(
-    feedbacks: Any,
-) -> None:
-    http = FakeHTTP(FakeResponse(mcp_payload("success")))
-    async_http = AsyncFakeHTTP(AsyncFakeResponse(mcp_payload("success")))
-
-    assert MCPClient(http=http).score(feedbacks) == "success"
-    assert asyncio.run(AsyncMCPClient(http=async_http).score(feedbacks)) == "success"
-    assert http.calls == async_http.calls
-    assert http.calls[0][1]["json"]["params"] == {
-        "name": "score",
-        "arguments": {"feedbacks": [{"request_id": "req-search", "score": 5}]},
-    }
-
-
-def test_mcp_score_rejects_invalid_feedback_before_sending() -> None:
-    http = FakeHTTP(FakeResponse(mcp_payload("success")))
-    async_http = AsyncFakeHTTP(AsyncFakeResponse(mcp_payload("success")))
-
-    with pytest.raises(ValueError, match="feedbacks"):
-        MCPClient(http=http).score([])
-    with pytest.raises(ValueError, match="feedbacks"):
-        asyncio.run(AsyncMCPClient(http=async_http).score([]))
-    assert not http.calls
-    assert not async_http.calls
+        assert retry.connect == 1
+        with pytest.raises(ReadTimeoutError):
+            DEFAULT_RETRIES.increment(
+                method="POST",
+                url="/search",
+                error=ReadTimeoutError(pool, "/search", "read timed out"),
+            )

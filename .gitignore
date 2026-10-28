@@ -6,6 +6,11 @@ dist/
 
 # Unit test
 .pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.hypothesis/
 
 # Environments
 .venv

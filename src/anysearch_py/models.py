@@ -50,7 +50,6 @@ class StrictRequestModel(BaseModel):
         extra="forbid",
         frozen=True,
         populate_by_name=True,
-        str_strip_whitespace=True,
         validate_default=True,
         allow_inf_nan=False,
     )
@@ -588,11 +587,19 @@ class MCPToolResult(ResponseModel):
             block.text for block in self.content if block.type == "text" and block.text
         )
 
-    def raise_if_error(self) -> None:
+    def raise_if_error(self, *, request_id: str | None = None) -> None:
         if not self.is_error:
             return
 
-        raise JSONRPCError(self.text or "MCP tool returned an error")
+        metadata_id = (self.meta or {}).get("request_id")
+        raise JSONRPCError(
+            self.text or "MCP tool returned an error",
+            request_id=(
+                metadata_id
+                if isinstance(metadata_id, str) and metadata_id
+                else request_id
+            ),
+        )
 
 
 class JSONRPCErrorObject(ResponseModel):
@@ -600,13 +607,16 @@ class JSONRPCErrorObject(ResponseModel):
     message: str
     data: JsonValue | None = None
 
-    def raise_error(self) -> None:
-        raise JSONRPCError(self.message, code=self.code, data=self.data)
+    def raise_error(self, *, request_id: str | None = None) -> None:
+        raise JSONRPCError(
+            self.message, code=self.code, data=self.data, request_id=request_id
+        )
 
 
 class JSONRPCResponse[DataT](ResponseModel):
     jsonrpc: Literal["2.0"]
     id: StrictInt | StrictStr
+    request_id: str | None = None
     result: DataT | None = None
     error: JSONRPCErrorObject | None = None
 
@@ -619,7 +629,7 @@ class JSONRPCResponse[DataT](ResponseModel):
 
     def unwrap(self) -> DataT:
         if self.error is not None:
-            self.error.raise_error()
+            self.error.raise_error(request_id=self.request_id)
         if self.result is None:
             msg = "MCP response is missing result"
             raise ResponseValidationError(msg, payload=self.model_dump(mode="json"))
@@ -645,7 +655,7 @@ class MCPToolResponse(JSONRPCResponse[MCPToolResult]):
             msg = "MCP response id does not match request id"
             raise ResponseValidationError(msg, payload=payload)
         result = response.unwrap()
-        result.raise_if_error()
+        result.raise_if_error(request_id=response.request_id)
         return result
 
 

@@ -15,14 +15,14 @@ tc: lint
     uv run ty check src tests
 
 test: tc
-    uv run pytest
+    uv run pytest --cov=anysearch_py
 
 check:
     uv lock --check
     uv run ruff format --check
     uv run ruff check
     uv run ty check src tests
-    uv run pytest
+    uv run pytest --cov=anysearch_py
 
 build: check
     uv build --no-create-gitignore --no-sources

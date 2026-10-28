@@ -1,0 +1,670 @@
+{
+  "base_url": "https://api.anysearch.com",
+  "captured_at": "2026-10-28",
+  "samples": {
+    "mcp_batch": {
+      "auth": "authenticated",
+      "body": {
+        "id": 1,
+        "jsonrpc": "2.0",
+        "result": {
+          "_meta": {
+            "request_ids": [
+              "d8d690ad-6ba7-4ecd-8275-bb78988f9e01",
+              "21648a16-84d5-4108-9054-6fe01adebe14"
+            ]
+          },
+          "content": [
+            {
+              "text": "## Query 1: pytest-asyncio pytest-httpserver official documentation testing async HTTP clients\n\n## Search Results (4 results, 2224ms)\n\n### 1. pytest-httpserver \u2014 pytest_httpserver 1.2.0 documentation\n- **URL**: https://pytest-httpserver.readthedocs.io/\n- pytest-httpserver is a python package which allows you to start a real HTTP server for your tests. The server can be configured programmatically to how to ...\n\n### 2. csernazs/pytest-httpserver: Http server for pytest to test ...\n- **URL**: https://github.com/csernazs/pytest-httpserver\n- This library is designed to help to test http clients without contacting the real http server. In other words, it is a fake http server which is accessible ...\n\n### 3. async-pytest-httpserver\n- **URL**: https://pypi.org/project/async-pytest-httpserver/2.1.0/\n- Fully async mock HTTP server for pytest \u2014 test HTTP clients against a real TCP server on localhost, with rich request matching and response control.\n\n### 4. Pytest-asyncio Guide: Test Async Functions in Python 2026\n- **URL**: https://qaskills.sh/blog/pytest-asyncio-testing-guide\n- This guide covers everything you need to test async code with pytest in 2026, on pytest 8.x and the current pytest-asyncio line. test real ... date: Jun 7, 2026\n\n```yaml\nrequest_id: d8d690ad-6ba7-4ecd-8275-bb78988f9e01\n```\n\n---\n\n## Query 2: Hypothesis pytest property based testing pytest-cov official documentation\n\n## Search Results (4 results, 893ms)\n\n### 1. Getting Started With Property-Based Testing in Python With ...\n- **URL**: https://semaphore.io/blog/property-based-testing-python-hypothesis-pytest\n- In this tutorial, we will be learning about the concepts behind property-based testing, and then we will put those concepts to practice. date: Jan 19, 2023\n\n### 2. API Reference - Hypothesis 6.167.1 documentation\n- **URL**: https://hypothesis.readthedocs.io/en/latest/settings.html\n- Targeted property-based testing combines the advantages of both search-based and property-based testing. ... # Illustrative code, inside the pytest-trio plugin ...\n\n### 3. Getting started with property-based testing in Python ...\n- **URL**: https://news.ycombinator.com/item?id=34450736\n- Getting started with property-based testing in Python with hypothesis and Pytest (semaphoreci.com) ... For example, I've used Hypothesis to test ... date: Jan 20, 2023\n\n### 4. Hypothesis - The property-based testing library for Python\n- **URL**: https://github.com/hypothesisworks/hypothesis\n- The property-based testing library for Python. Contribute to HypothesisWorks/hypothesis development by creating an account on GitHub.\n\n```yaml\nrequest_id: 21648a16-84d5-4108-9054-6fe01adebe14\n```\n",
+              "type": "text"
+            }
+          ]
+        }
+      },
+      "headers": {
+        "content-type": "application/json",
+        "x-request-id": "cca36b9d-380f-4d99-80d4-9b809428afea"
+      },
+      "label": "pytest-research",
+      "status": 200
+    },
+    "mcp_domains": {
+      "auth": "authenticated",
+      "body": {
+        "id": 3,
+        "jsonrpc": "2.0",
+        "result": {
+          "_meta": {
+            "request_id": "8756b559-71ba-45d4-a84c-c7d7559d359d"
+          },
+          "content": [
+            {
+              "text": "## finance Domain Capabilities (6 available)\n\n### finance.calendar\nEarnings dates, guidance, economic data releases, IPO schedules\n\n**Parameters:**\n- `type` (required): Calendar type. Values: `earnings` (earnings release schedule), `dividends` (dividend calendar), `ipos` (IPO schedule), `economic` (economic data release calendar)\n- `period`: Forward-looking time range. Default `7d`. Valid values same as quote\n- `symbol`: Stock ticker, used only when type=dividends. E.g., `AAPL`. When empty, returns market-wide schedule\n\n### finance.fundamental\nFinancial statements, valuation metrics, analyst ratings, shareholder structure, SEC filings\n\n**Parameters:**\n- `type` (required): Data type. Values: `overview` (summary card: ratings + target price + income statement + key metrics, international markets), `income` (income statement, A-shares), `balance` (balance sheet, A-shares), `cashflow` (cash flow statement, A-shares), `indicator` (financial indicators: ROE/gross margin etc., A-shares), `holder` (top 10 shareholders, A-shares)\n- `symbol` (required): International market ticker, used when type=overview. E.g., `AAPL`. When empty, parsed from query\n- `cn_code` (required): A-share ticker, **required** when type=income/balance/cashflow/indicator/holder. E.g., `600519.SH`\n- `period`: Used only when type=holder, controls shareholder data time range. Default `1y`\n\n### finance.macro\nMacroeconomic indicators: GDP, CPI, PMI, interest rates (Shibor/LPR/Fed Funds), money supply, social financing\n\n**Parameters:**\n- `type` (required): Indicator type. Values: `gdp` (China & US GDP), `cpi` (China & US CPI), `fed_funds` (Federal Funds Rate), `treasury` (US Treasury yield curve 1M~30Y), `unemployment` (US unemployment rate), `nonfarm` (US nonfarm payrolls), `shibor` (China interbank rates), `lpr` (China LPR loan rates), `money_supply` (China M0/M1/M2), `social_finance` (China aggregate social financing)\n- `period`: Data time range. Default varies by type: gdp defaults to `2y`, cpi/lpr/money_supply/social_finance defaults to `1y`, shibor defaults to `30d`, US indicators truncated by maxResults. Valid values same as quote\n\n### finance.news\nGlobal financial news, company announcements, broker research summaries\n\n**Parameters:**\n- `cn_code`: A-share ticker, used only when type=announcement. E.g., `600519.SH`. When empty, returns market-wide announcements\n- `news_src`: Chinese flash news source, used only when type=flash. Default `sina`. Values: `sina` (Sina Finance), `wallstreetcn` (Wallstreetcn), `10jqka` (Tonghuashun), `eastmoney` (East Money), `cls` (Cailian Press), `yicai` (Yicai), `yuncaijing` (Cloud Finance), `fenghuang` (Phoenix Finance), `jinrongjie` (Financial Street)\n- `period`: Query time range. type=flash/announcement defaults to `1d` (current day). Valid values same as quote\n- `symbol`: International market ticker, used only when type=stock. E.g., `AAPL`. When empty, parsed from query\n- `type` (required): News type. Values: `general` (global English financial news), `stock` (international single-stock news), `flash` (Chinese financial headlines), `announcement` (A-share listed company announcements)\n\n### finance.quote\nReal-time and historical quotes for stocks, forex, crypto, commodities, indices, ETFs, futures\n\n**Parameters:**\n- `type` (required): Asset type. Values: `stock` (global stocks + A-shares), `forex` (foreign exchange), `crypto` (cryptocurrency), `commodity` (commodities), `index` (Chinese indices), `etf` (Chinese ETFs)\n- `symbol`: International market symbol. type=stock: e.g., `AAPL`; type=forex: e.g., `EURUSD` (6-char pair); type=crypto: e.g., `BTCUSD` (required); type=commodity: e.g., `CLUSD` (empty returns market snapshot)\n- `cn_code`: Chinese market symbol. type=stock: e.g., `000001.SZ`, `600519.SH`; type=index: e.g., `399300.SZ`; type=etf: e.g., `510300.SH`; type=forex: e.g., `USDCNH.FXCM`\n- `period`: Historical data time range. Values: `7d`/`14d`/`30d`/`90d`/`180d`/`1y`/`5y` or custom `{N}d`. International markets default `7d`, Chinese markets default `30d`\n\n### finance.screen\nScreen stocks by market cap, PE, dividend yield, sector, country (international markets only)\n\n**Parameters:**\n- `type` (required): Screen type. Values: `stock` (screen stocks by sector/country), `etf` (search ETFs by name, query used as filter)\n- `sector`: GICS sector, used only when type=stock. Values: `Technology`, `Healthcare`, `Financial Services`, `Consumer Cyclical`, `Consumer Defensive`, `Industrials`, `Energy`, `Basic Materials`, `Communication Services`, `Real Estate`, `Utilities`\n- `country`: ISO 3166-1 alpha-2 country code, used only when type=stock. E.g., `US`, `JP`, `GB`, `DE`, `CN`, `HK`. Note: filters by company registration country, not exchange country\n\n",
+              "type": "text"
+            }
+          ]
+        }
+      },
+      "headers": {
+        "content-type": "application/json",
+        "x-request-id": "8756b559-71ba-45d4-a84c-c7d7559d359d"
+      },
+      "label": "mcp-domain-selectors",
+      "status": 200
+    },
+    "mcp_empty_batch": {
+      "auth": "authenticated",
+      "body": {
+        "id": 3,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "queries must not be empty",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      },
+      "headers": {
+        "content-type": "application/json",
+        "x-request-id": "50746a6f-9dfe-4987-a54e-5c08aa00aec8"
+      },
+      "label": "mcp-batch-empty",
+      "status": 200
+    },
+    "mcp_empty_score": {
+      "auth": "authenticated",
+      "body": {
+        "id": 6,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "Feedbacks must contain between 1 and 10 entries.",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      },
+      "headers": {
+        "content-type": "application/json",
+        "x-request-id": "4cdbab59-379a-445f-8d27-9af5282803a7"
+      },
+      "label": "mcp-score-empty",
+      "status": 200
+    },
+    "mcp_extract": {
+      "auth": "authenticated",
+      "body": {
+        "id": 4,
+        "jsonrpc": "2.0",
+        "result": {
+          "_meta": {
+            "request_id": "bac335be-c047-49bd-a09a-f16c4d5560ca"
+          },
+          "content": [
+            {
+              "text": "{\"url\":\"https://example.com\",\"title\":\"Example Domain\",\"content\":\"This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.\"}",
+              "type": "text"
+            }
+          ],
+          "structuredContent": {
+            "content": "This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.",
+            "title": "Example Domain",
+            "url": "https://example.com"
+          }
+        }
+      },
+      "headers": {
+        "content-type": "application/json",
+        "x-request-id": "bac335be-c047-49bd-a09a-f16c4d5560ca"
+      },
+      "label": "mcp-extract-success",
+      "status": 200
+    },
+    "mcp_invalid_auth": {
+      "auth": "invalid_key",
+      "body": {
+        "id": 9,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "invalid_api_key\nInvalid API key.",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      },
+      "headers": {
+        "content-type": "application/json",
+        "x-request-id": "194244f0-0597-4011-a213-1301b990437f"
+      },
+      "label": "mcp-invalid-auth-search",
+      "status": 200
+    },
+    "mcp_invalid_batch": {
+      "auth": "authenticated",
+      "body": {
+        "id": 2,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "queries[1]: query is required",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      },
+      "headers": {
+        "content-type": "application/json",
+        "x-request-id": "7fc9f49f-3a89-4b93-b3c3-ece56c54114c"
+      },
+      "label": "mcp-batch-partial",
+      "status": 200
+    },
+    "mcp_invalid_url": {
+      "auth": "authenticated",
+      "body": {
+        "id": 4,
+        "jsonrpc": "2.0",
+        "result": {
+          "_meta": {
+            "request_id": "8900da06-818d-4235-b007-fbd5bfa44584"
+          },
+          "content": [
+            {
+              "text": "invalid_extract_url\nURL is invalid.",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      },
+      "headers": {
+        "content-type": "application/json",
+        "x-request-id": "8900da06-818d-4235-b007-fbd5bfa44584"
+      },
+      "label": "mcp-extract-invalid-url",
+      "status": 200
+    },
+    "mcp_missing_domains": {
+      "auth": "authenticated",
+      "body": {
+        "id": 5,
+        "jsonrpc": "2.0",
+        "result": {
+          "_meta": {
+            "request_id": "d7485351-9386-4737-8c99-a0fd6e64a38f"
+          },
+          "content": [
+            {
+              "text": "domain or domains is required; choose from the domain list in the tool description",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      },
+      "headers": {
+        "content-type": "application/json",
+        "x-request-id": "d7485351-9386-4737-8c99-a0fd6e64a38f"
+      },
+      "label": "mcp-domain-missing",
+      "status": 200
+    },
+    "mcp_missing_query": {
+      "auth": "authenticated",
+      "body": {
+        "id": 2,
+        "jsonrpc": "2.0",
+        "result": {
+          "_meta": {
+            "request_id": "3212d1e1-2221-4575-9b5d-1d53671aed17"
+          },
+          "content": [
+            {
+              "text": "query is required",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      },
+      "headers": {
+        "content-type": "application/json",
+        "x-request-id": "3212d1e1-2221-4575-9b5d-1d53671aed17"
+      },
+      "label": "mcp-search-missing-query",
+      "status": 200
+    },
+    "mcp_score": {
+      "auth": "authenticated",
+      "body": {
+        "id": 1,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "success",
+              "type": "text"
+            }
+          ],
+          "structuredContent": {
+            "message": "success",
+            "queued": 2,
+            "rejected": 0,
+            "status": "queued"
+          }
+        }
+      },
+      "headers": {
+        "content-type": "application/json",
+        "x-request-id": "cdbd9490-c16b-40a4-b9f2-4cfae5898108"
+      },
+      "label": "score-success",
+      "status": 200
+    },
+    "mcp_search": {
+      "auth": "authenticated",
+      "body": {
+        "id": 1,
+        "jsonrpc": "2.0",
+        "result": {
+          "_meta": {
+            "request_id": "2414bb1a-89a9-4be4-a98e-2701ae330dcb"
+          },
+          "content": [
+            {
+              "text": "## Search Results (1 results, 1539ms)\n\n### 1. pytest documentation\n- **URL**: https://docs.pytest.org/\n- The pytest framework makes it easy to write small, readable tests, and can scale to support complex functional testing for applications and libraries. PyPI ...\n\n```yaml\nrequest_id: 2414bb1a-89a9-4be4-a98e-2701ae330dcb\n```\n",
+              "type": "text"
+            }
+          ]
+        }
+      },
+      "headers": {
+        "content-type": "application/json",
+        "x-request-id": "2414bb1a-89a9-4be4-a98e-2701ae330dcb"
+      },
+      "label": "mcp-single-search",
+      "status": 200
+    },
+    "mcp_unknown_tool": {
+      "auth": "authenticated",
+      "body": {
+        "error": {
+          "code": -32602,
+          "message": "tool 'unknown_sdk_tool' not found: tool not found"
+        },
+        "id": 1,
+        "jsonrpc": "2.0"
+      },
+      "headers": {
+        "content-type": "application/json",
+        "x-request-id": "33aa6eee-a520-4332-80c0-1d5cc771eb12"
+      },
+      "label": "mcp-unknown-tool",
+      "status": 200
+    },
+    "rest_domains": {
+      "auth": "authenticated",
+      "body": {
+        "code": 0,
+        "data": {
+          "billing_contract_version": 1,
+          "domains": [
+            {
+              "description": "Developer documentation, code snippet search across GitHub",
+              "domain": "code",
+              "sub_domains": [
+                {
+                  "description": "Query developer documentation and code examples by library name and topic across npm, PyPI, Cargo ecosystems",
+                  "params": {
+                    "library": {
+                      "description": "Library or framework name to query docs for, e.g. react, express",
+                      "required": true,
+                      "sort_order": 0
+                    }
+                  },
+                  "sub_domain": "code.doc"
+                },
+                {
+                  "description": "Search real code implementations across 1M+ public GitHub repositories with regex and language filtering",
+                  "params": {
+                    "lang": {
+                      "description": "Filter by programming language, e.g. TypeScript, Python",
+                      "required": false,
+                      "sort_order": 0
+                    },
+                    "path": {
+                      "description": "Filter by file path pattern, e.g. src/components/",
+                      "required": false,
+                      "sort_order": 0
+                    },
+                    "repo": {
+                      "description": "Filter by GitHub repository, e.g. facebook/react",
+                      "required": false,
+                      "sort_order": 0
+                    }
+                  },
+                  "sub_domain": "code.snippet"
+                }
+              ]
+            },
+            {
+              "description": "Stocks, forex, crypto, commodities, ETF, futures quotes, financial news, fundamentals, macro data, screening, calendar",
+              "domain": "finance",
+              "sub_domains": [
+                {
+                  "description": "Earnings dates, guidance, economic data releases, IPO schedules",
+                  "params": {
+                    "period": {
+                      "description": "Forward-looking time range. Default `7d`. Valid values same as quote",
+                      "required": false,
+                      "sort_order": 1
+                    },
+                    "symbol": {
+                      "description": "Stock ticker, used only when type=dividends. E.g., `AAPL`. When empty, returns market-wide schedule",
+                      "required": false,
+                      "sort_order": 2
+                    },
+                    "type": {
+                      "description": "Calendar type. Values: `earnings` (earnings release schedule), `dividends` (dividend calendar), `ipos` (IPO schedule), `economic` (economic data release calendar)",
+                      "required": true,
+                      "sort_order": 0
+                    }
+                  },
+                  "sub_domain": "finance.calendar"
+                },
+                {
+                  "description": "Financial statements, valuation metrics, analyst ratings, shareholder structure, SEC filings",
+                  "params": {
+                    "cn_code": {
+                      "description": "A-share ticker, **required** when type=income/balance/cashflow/indicator/holder. E.g., `600519.SH`",
+                      "required": true,
+                      "sort_order": 2
+                    },
+                    "period": {
+                      "description": "Used only when type=holder, controls shareholder data time range. Default `1y`",
+                      "required": false,
+                      "sort_order": 3
+                    },
+                    "symbol": {
+                      "description": "International market ticker, used when type=overview. E.g., `AAPL`. When empty, parsed from query",
+                      "required": true,
+                      "sort_order": 1
+                    },
+                    "type": {
+                      "description": "Data type. Values: `overview` (summary card: ratings + target price + income statement + key metrics, international markets), `income` (income statement, A-shares), `balance` (balance sheet, A-shares), `cashflow` (cash flow statement, A-shares), `indicator` (financial indicators: ROE/gross margin etc., A-shares), `holder` (top 10 shareholders, A-shares)",
+                      "required": true,
+                      "sort_order": 0
+                    }
+                  },
+                  "sub_domain": "finance.fundamental"
+                },
+                {
+                  "description": "Macroeconomic indicators: GDP, CPI, PMI, interest rates (Shibor/LPR/Fed Funds), money supply, social financing",
+                  "params": {
+                    "period": {
+                      "description": "Data time range. Default varies by type: gdp defaults to `2y`, cpi/lpr/money_supply/social_finance defaults to `1y`, shibor defaults to `30d`, US indicators truncated by maxResults. Valid values same as quote",
+                      "required": false,
+                      "sort_order": 1
+                    },
+                    "type": {
+                      "description": "Indicator type. Values: `gdp` (China & US GDP), `cpi` (China & US CPI), `fed_funds` (Federal Funds Rate), `treasury` (US Treasury yield curve 1M~30Y), `unemployment` (US unemployment rate), `nonfarm` (US nonfarm payrolls), `shibor` (China interbank rates), `lpr` (China LPR loan rates), `money_supply` (China M0/M1/M2), `social_finance` (China aggregate social financing)",
+                      "required": true,
+                      "sort_order": 0
+                    }
+                  },
+                  "sub_domain": "finance.macro"
+                },
+                {
+                  "description": "Global financial news, company announcements, broker research summaries",
+                  "params": {
+                    "cn_code": {
+                      "description": "A-share ticker, used only when type=announcement. E.g., `600519.SH`. When empty, returns market-wide announcements",
+                      "required": false,
+                      "sort_order": 0
+                    },
+                    "news_src": {
+                      "description": "Chinese flash news source, used only when type=flash. Default `sina`. Values: `sina` (Sina Finance), `wallstreetcn` (Wallstreetcn), `10jqka` (Tonghuashun), `eastmoney` (East Money), `cls` (Cailian Press), `yicai` (Yicai), `yuncaijing` (Cloud Finance), `fenghuang` (Phoenix Finance), `jinrongjie` (Financial Street)",
+                      "required": false,
+                      "sort_order": 0
+                    },
+                    "period": {
+                      "description": "Query time range. type=flash/announcement defaults to `1d` (current day). Valid values same as quote",
+                      "required": false,
+                      "sort_order": 0
+                    },
+                    "symbol": {
+                      "description": "International market ticker, used only when type=stock. E.g., `AAPL`. When empty, parsed from query",
+                      "required": false,
+                      "sort_order": 0
+                    },
+                    "type": {
+                      "description": "News type. Values: `general` (global English financial news), `stock` (international single-stock news), `flash` (Chinese financial headlines), `announcement` (A-share listed company announcements)",
+                      "required": true,
+                      "sort_order": 0
+                    }
+                  },
+                  "sub_domain": "finance.news"
+                },
+                {
+                  "description": "Real-time and historical quotes for stocks, forex, crypto, commodities, indices, ETFs, futures",
+                  "params": {
+                    "cn_code": {
+                      "description": "Chinese market symbol. type=stock: e.g., `000001.SZ`, `600519.SH`; type=index: e.g., `399300.SZ`; type=etf: e.g., `510300.SH`; type=forex: e.g., `USDCNH.FXCM`",
+                      "required": false,
+                      "sort_order": 2
+                    },
+                    "period": {
+                      "description": "Historical data time range. Values: `7d`/`14d`/`30d`/`90d`/`180d`/`1y`/`5y` or custom `{N}d`. International markets default `7d`, Chinese markets default `30d`",
+                      "required": false,
+                      "sort_order": 3
+                    },
+                    "symbol": {
+                      "description": "International market symbol. type=stock: e.g., `AAPL`; type=forex: e.g., `EURUSD` (6-char pair); type=crypto: e.g., `BTCUSD` (required); type=commodity: e.g., `CLUSD` (empty returns market snapshot)",
+                      "required": false,
+                      "sort_order": 1
+                    },
+                    "type": {
+                      "description": "Asset type. Values: `stock` (global stocks + A-shares), `forex` (foreign exchange), `crypto` (cryptocurrency), `commodity` (commodities), `index` (Chinese indices), `etf` (Chinese ETFs)",
+                      "required": true,
+                      "sort_order": 0
+                    }
+                  },
+                  "sub_domain": "finance.quote"
+                },
+                {
+                  "description": "Screen stocks by market cap, PE, dividend yield, sector, country (international markets only)",
+                  "params": {
+                    "country": {
+                      "description": "ISO 3166-1 alpha-2 country code, used only when type=stock. E.g., `US`, `JP`, `GB`, `DE`, `CN`, `HK`. Note: filters by company registration country, not exchange country",
+                      "required": false,
+                      "sort_order": 2
+                    },
+                    "sector": {
+                      "description": "GICS sector, used only when type=stock. Values: `Technology`, `Healthcare`, `Financial Services`, `Consumer Cyclical`, `Consumer Defensive`, `Industrials`, `Energy`, `Basic Materials`, `Communication Services`, `Real Estate`, `Utilities`",
+                      "required": false,
+                      "sort_order": 1
+                    },
+                    "type": {
+                      "description": "Screen type. Values: `stock` (screen stocks by sector/country), `etf` (search ETFs by name, query used as filter)",
+                      "required": true,
+                      "sort_order": 0
+                    }
+                  },
+                  "sub_domain": "finance.screen"
+                }
+              ]
+            }
+          ],
+          "topology_generation": "df90bc6b-3b54-474d-874b-9af69a87c42d",
+          "topology_version": 4
+        },
+        "message": "success",
+        "request_id": "4b94d06e-11a1-4dea-b3d6-d39003117776"
+      },
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "x-request-id": "4b94d06e-11a1-4dea-b3d6-d39003117776"
+      },
+      "label": "domains",
+      "status": 200
+    },
+    "rest_extract": {
+      "auth": "authenticated",
+      "body": {
+        "code": 0,
+        "data": {
+          "content": "# anysearch-py\n\nTyped Python clients for AnySearch.\n\n`Client` and `AsyncClient` call the REST Web API.\n`MCPClient` and `AsyncMCPClient` call the remote MCP `tools/call` API.\nAll clients share Pydantic models, validation, and serialization logic.\n\n| API | Methods |\n| --- | --- |\n| REST | `search`, `extract`, `get_sub_domains` |\n| MCP | `search`, `batch_search`, `extract`, `get_sub_domains`, `score`, `call_tool` |\n\nThe API key is optional when the AnySearch endpoint permits anonymous access.\n\nRequires Python 3.14 or newer.\nContracts were checked against the [official REST documentation](https://www.anysearch.com/docs/api-endpoints), the live domain directory, and MCP `tools/list` on 2026-10-28.\n\n## Install\n\n```bash\nuv add anysearch-py\n```\n\n## REST Search\n\n```python\nfrom anysearch_py import Client, SearchTag\n\nwith Client(api_key=<redacted> as client:\n    response = client.search(\n        \"Python 3.15 new features\",\n        tag=SearchTag.CODE_DOC,\n        params={\"library\": \"python\"},\n    )\n\nprint(response.data.results[0].url)\n```\n\n`max_results` must be an integer from 1 to 10.\nResult titles may be empty, and `snippet` and `content` may be `None` when unavailable.\n`output_format=\"markdown\"` puts Markdown in result content; the response remains a typed JSON envelope.\n\n## REST Domain Discovery\n\nDiscover current tags and their parameter definitions before choosing a vertical search.\n\n```python\nfrom anysearch_py import Client, Domain\n\nwith Client(api_key=<redacted> as client:\n    response = client.get_sub_domains(domains=[Domain.CODE, Domain.FINANCE])\n\nfor domain in response.data.domains:\n    for capability in domain.sub_domains:\n        print(capability.sub_domain, capability.params)\n```\n\nThe SDK sends repeated `domain` query parameters for multiple domains.\nUnknown REST domains return an empty capability list.\nREST search accepts discovered `domain.sub_domain` strings as well as `SearchTag` values.\n\n## REST Extraction\n\n```python\nfrom anysearch_py import Client\n\nwith Client(api_key=<redacted> as client:\n    response = client.extract(\"https://example.com\")\n\nprint(response.data.title)\nprint(response.data.content)\n```\n\nExtraction supports HTML, plain text, JSON, and Markdown from public HTTP or HTTPS URLs.\nSee the [extract endpoint](https://www.anysearch.com/docs/api-endpoints/v1-extract) for request limits and errors.\n\n## Async REST Search\n\n```python\nimport asyncio\n\nfrom anysearch_py import AsyncClient\n\n\nasync def main() -> None:\n    async with AsyncClient(api_key=<redacted> as client:\n        response = await client.search(\"Python 3.15 new features\")\n\n    print(response.data.results[0].url)\n\n\nasyncio.run(main())\n```\n\n`AsyncClient.extract` and `AsyncClient.get_sub_domains` use the same arguments and response models as their synchronous counterparts.\n\n## MCP Tools\n\n```python\nfrom anysearch_py import Domain, MCPClient\n\nwith MCPClient(api_key=<redacted> as client:\n    markdown = client.get_sub_domains(domains=[Domain.FINANCE, Domain.HEALTH])\n\nprint(markdown)\n```\n\n## MCP Search\n\n```python\nfrom anysearch_py import MCPClient\n\nwith MCPClient(api_key=<redacted> as client:\n    markdown = client.search(\"Python 3.15 new features\", max_results=5)\n\nprint(markdown)\n```\n\n## MCP Metadata and Feedback\n\nUse `call_tool` to retain structured content and metadata alongside text.\n`structured_content` exposes `structuredContent`, and `meta` exposes `_meta`.\nSearch metadata contains `request_id`; batch search metadata contains `request_ids`, one per query.\n\n```python\nfrom anysearch_py import MCPClient, ScoreFeedback, SearchArguments\n\nwith MCPClient(api_key=<redacted> as client:\n    result = client.call_tool(SearchArguments(query=\"Python 3.15 new features\"))\n    print(result.text)\n\n    request_id = (result.meta or {}).get(\"request_id\")\n    if isinstance(request_id, str):\n        client.score([ScoreFeedback(request_id=request_id, score=4)])\n```\n\nChoose the score after reviewing the results: 1 means unusable, 5 means fully answered.\n`score` accepts 1\u201310 feedback entries with integer scores from 1 to 5 and request IDs up to 64 characters.\nFeedback submission acknowledges queuing, not persistence.\n`AsyncMCPClient` provides the same methods as awaitable calls.\n\n## Errors\n\nNon-success HTTP responses raise `HTTPStatusError`, exposing `status`, `code`, `error_code`, `request_id`, `data`, and `headers`.\nREST errors inside an HTTP 200 response raise `APIError` with the same business error fields.\nMCP errors raise `JSONRPCError`; invalid JSON and unexpected response schemas raise `ResponseDecodeError` and `ResponseValidationError`.\n\nHTTP 402 messages can contain generated account credentials, so treat their messages as secrets and avoid logging them.\nThe SDK retries connection failures only; it does not automatically replay requests after HTTP errors or read timeouts.\n\n## Catalog Changes\n\nThe current catalog uses `ACADEMIC_PAPER`, `ACADEMIC_PERSON`, `LEGAL_ENFORCEMENT`, and `LEGAL_JUDICIAL`.\nThe former `ACADEMIC_BIOMEDICAL`, `ACADEMIC_PREPRINT`, `ACADEMIC_SEARCH`, `LEGAL_CASE`, and `LEGAL_STATUTE` enum members were removed.\nUse `get_sub_domains` to choose the capability matching your query.\n\n## Live Tests\n\nLive tests read `ANYSEARCH_API_KEY` from the environment first, then `.env`.\n\nIf neither source provides a non-empty value, those tests skip automatically.\n\nPackage code never reads `.env`.\n",
+          "title": "",
+          "url": "https://raw.githubusercontent.com/WH-2099/anysearch-py/v0.3.0/README.md"
+        },
+        "message": "success",
+        "request_id": "29577a61-582b-4987-8397-0891dab2ebc7"
+      },
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "x-request-id": "29577a61-582b-4987-8397-0891dab2ebc7"
+      },
+      "label": "rest-extract",
+      "status": 200
+    },
+    "rest_invalid_auth": {
+      "auth": "invalid_key",
+      "body": {
+        "code": -1,
+        "error_code": "invalid_api_key",
+        "message": "Invalid API key.",
+        "request_id": "7d4522ff-a7d1-490a-99eb-a63d630c1e1e"
+      },
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "x-request-id": "7d4522ff-a7d1-490a-99eb-a63d630c1e1e"
+      },
+      "label": "auth-search",
+      "status": 401
+    },
+    "rest_invalid_url": {
+      "auth": "authenticated",
+      "body": {
+        "code": -1,
+        "error_code": "invalid_extract_url",
+        "message": "URL is invalid.",
+        "request_id": "bc860f64-79d3-431d-9e21-14a0976e83f7"
+      },
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "x-request-id": "bc860f64-79d3-431d-9e21-14a0976e83f7"
+      },
+      "label": "extract-invalid-url",
+      "status": 400
+    },
+    "rest_markdown": {
+      "auth": "authenticated",
+      "body": {
+        "code": 0,
+        "data": {
+          "metadata": {
+            "search_time_ms": 2532,
+            "total_results": 1
+          },
+          "results": [
+            {
+              "content": "## 1. pytest documentation\n\n**URL**: https://docs.pytest.org/\n\nThe pytest framework makes it easy to write small, readable tests, and can scale to support complex functional testing for applications and libraries. PyPI ...",
+              "snippet": "The pytest framework makes it easy to write small, readable tests, and can scale to support complex functional testing for applications and libraries. PyPI ...",
+              "title": "pytest documentation",
+              "url": "https://docs.pytest.org/"
+            }
+          ]
+        },
+        "message": "success",
+        "request_id": "83222067-84d0-4bd9-9d9f-65c21ccfaf8d"
+      },
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "x-request-id": "83222067-84d0-4bd9-9d9f-65c21ccfaf8d"
+      },
+      "label": "rest-search-markdown",
+      "status": 200
+    },
+    "rest_missing_domains": {
+      "auth": "authenticated",
+      "body": {
+        "code": -1,
+        "message": "At least one domain parameter is required.",
+        "request_id": "e3855c9b-6877-475b-a83b-e77ad7ef65ff"
+      },
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "x-request-id": "e3855c9b-6877-475b-a83b-e77ad7ef65ff"
+      },
+      "label": "domains-missing",
+      "status": 400
+    },
+    "rest_missing_query": {
+      "auth": "authenticated",
+      "body": {
+        "code": -1,
+        "message": "Query is required.",
+        "request_id": "cb696b96-4c7f-4007-bf15-539967d3f590"
+      },
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "x-request-id": "cb696b96-4c7f-4007-bf15-539967d3f590"
+      },
+      "label": "search-missing-query",
+      "status": 400
+    },
+    "rest_search": {
+      "auth": "authenticated",
+      "body": {
+        "code": 0,
+        "data": {
+          "metadata": {
+            "search_time_ms": 1027,
+            "total_results": 1
+          },
+          "results": [
+            {
+              "content": "The pytest framework makes it easy to write small, readable tests, and can scale to support complex functional testing for applications and libraries. PyPI ...",
+              "snippet": "The pytest framework makes it easy to write small, readable tests, and can scale to support complex functional testing for applications and libraries. PyPI ...",
+              "title": "pytest documentation",
+              "url": "https://docs.pytest.org/"
+            }
+          ]
+        },
+        "message": "success",
+        "request_id": "6584afe5-246b-449a-83cc-5838532cc310"
+      },
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "x-request-id": "6584afe5-246b-449a-83cc-5838532cc310"
+      },
+      "label": "rest-search-json",
+      "status": 200
+    },
+    "rest_unknown_domain": {
+      "auth": "authenticated",
+      "body": {
+        "code": -1,
+        "message": "Capabilities temporarily unavailable.",
+        "request_id": "a2c36d11-f5d8-42d0-ad07-00d6896045f0"
+      },
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "x-request-id": "a2c36d11-f5d8-42d0-ad07-00d6896045f0"
+      },
+      "label": "unknown-domain",
+      "status": 502
+    }
+  }
+}
