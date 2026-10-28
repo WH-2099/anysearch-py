@@ -107,7 +107,7 @@ class _HTTPClient:
     def _backfill_request_id(self, response: Any, payload: Any) -> Any:
         if (
             not isinstance(payload, dict)
-            or "code" not in payload
+            or ("code" not in payload and "jsonrpc" not in payload)
             or payload.get("request_id")
         ):
             return payload

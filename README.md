@@ -57,7 +57,7 @@ for domain in response.data.domains:
 ```
 
 The SDK sends repeated `domain` query parameters for multiple domains.
-Unknown REST domains return an empty capability list.
+Unknown REST domains can fail when the service cannot resolve their capabilities.
 REST search accepts discovered `domain.sub_domain` strings as well as `SearchTag` values.
 
 ## REST Extraction
@@ -155,10 +155,32 @@ The current catalog uses `ACADEMIC_PAPER`, `ACADEMIC_PERSON`, `LEGAL_ENFORCEMENT
 The former `ACADEMIC_BIOMEDICAL`, `ACADEMIC_PREPRINT`, `ACADEMIC_SEARCH`, `LEGAL_CASE`, and `LEGAL_STATUTE` enum members were removed.
 Use `get_sub_domains` to choose the capability matching your query.
 
-## Live Tests
+## Tests
 
-Live tests read `ANYSEARCH_API_KEY` from the environment first, then `.env`.
+```bash
+just check
+uv run pytest --cov=anysearch_py --cov-report=term-missing
+```
 
-If neither source provides a non-empty value, those tests skip automatically.
+The default suite runs without credentials or internet access.
+It uses `pytest-httpserver` to exercise real HTTP connections for all four clients, recorded service responses for schema checks, and Hypothesis for nested JSON serialization.
+Both anonymous and authenticated request headers are checked locally.
+The coverage gate requires at least 95% combined statement and branch coverage.
 
+Run the public service tests explicitly:
+
+```bash
+uv run pytest tests/test_live.py --live=anonymous
+uv run pytest tests/test_live.py --live=authenticated
+uv run pytest tests/test_live.py --live=all
+```
+
+Each mode covers synchronous and asynchronous clients, REST and MCP methods, server validation, and invalid credentials.
+Authenticated tests read `ANYSEARCH_API_KEY` from the environment first, then the project `.env` through `python-dotenv`.
+Requesting authenticated tests without a key is a configuration error.
 Package code never reads `.env`.
+
+Live tests consume service quota and submit score feedback for successful test searches.
+They require public AnySearch and GitHub raw content access; upstream errors fail the run.
+Pytest failure reports redact the configured key and generated account credentials.
+Captured responses and their provenance are documented in [tests/fixtures/README.md](tests/fixtures/README.md).
