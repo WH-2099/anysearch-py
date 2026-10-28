@@ -1,6 +1,6 @@
 [project]
 name = 'anysearch-py'
-version = '0.2.0'
+version = "0.3.0"
 description = 'Typed Python client for AnySearch.'
 readme = 'README.md'
 license = 'MIT'
@@ -10,8 +10,8 @@ authors = [
 ]
 requires-python = '>=3.14'
 dependencies = [
-    'pydantic>=2.12',
-    'urllib3-future>=2.12.910',
+    'pydantic>=2.14.1',
+    'urllib3-future>=2.25.904',
 ]
 
 
@@ -22,14 +22,14 @@ issues = 'https://github.com/WH-2099/anysearch-py/issues'
 
 [dependency-groups]
 dev = [
-    'pytest',
-    'ruff',
-    'prek',
-    'ty',
+    'pytest>=9.2.0',
+    'ruff>=0.17.3',
+    'prek>=0.5.7',
+    'ty>=0.0.93',
 ]
 
 [build-system]
-requires = ['uv_build~=0.12']
+requires = ['uv_build~=0.13.6']
 build-backend = 'uv_build'
 
 [tool.uv]
@@ -38,7 +38,7 @@ default-groups = ['dev']
 [tool.ruff]
 fix = true
 preview = true
-required-version = '>=0.15'
+required-version = '>=0.17.3'
 
 [tool.ruff.lint]
 select = ['ALL']
@@ -70,5 +70,5 @@ ignore-one-line-docstrings = true
 python-platform = 'linux'
 
 [tool.pytest]
-minversion = '9.0'
+minversion = '9.2'
 testpaths = ['tests']

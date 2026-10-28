@@ -11,15 +11,21 @@ from anysearch_py import (
     BatchSearchArguments,
     Domain,
     ExtractArguments,
+    ExtractRequest,
+    ExtractResponse,
     GetSubDomainsArguments,
+    GetSubDomainsRequest,
     JSONRPCError,
     MCPToolCall,
     MCPToolResponse,
     ResponseValidationError,
+    ScoreArguments,
+    ScoreFeedback,
     SearchArguments,
     SearchRequest,
     SearchResponse,
     SearchTag,
+    SubDomainsResponse,
     ToolName,
 )
 
@@ -184,8 +190,8 @@ def test_request_models_serialize_payload_matrix(
 @pytest.mark.parametrize(
     ("model", "payload"),
     [
-        (SearchRequest, {"query": "x", "tag": "unknown.tag"}),
-        (SearchRequest, {"query": "x", "max_results": 21}),
+        (SearchRequest, {"query": "x", "tag": "missing-domain"}),
+        (SearchRequest, {"query": "x", "max_results": 11}),
         (SearchRequest, {"query": "x", "max_results": True}),
         (SearchRequest, {"query": "x", "params": {"value": float("nan")}}),
         (SearchRequest, {"query": "x", "params": {"value": b"not-json"}}),
@@ -208,6 +214,26 @@ def test_request_models_serialize_payload_matrix(
         ),
         (GetSubDomainsArguments, {}),
         (GetSubDomainsArguments, {"domain": "finance", "domains": ["health"]}),
+        (GetSubDomainsRequest, {}),
+        (GetSubDomainsRequest, {"domains": []}),
+        (GetSubDomainsRequest, {"domain": " "}),
+        (GetSubDomainsRequest, {"domain": "code", "domains": ["finance"]}),
+        (GetSubDomainsArguments, {"domain": "unknown"}),
+        (GetSubDomainsArguments, {"domains": ["code"] * 6}),
+        (ExtractRequest, {"url": "ftp://example.com/article"}),
+        (ExtractRequest, {"url": "https://example.com", "format": "markdown"}),
+        (ScoreArguments, {"feedbacks": []}),
+        (
+            ScoreArguments,
+            {"feedbacks": [{"request_id": "req-1", "score": 5}] * 11},
+        ),
+        (ScoreFeedback, {"request_id": " ", "score": 5}),
+        (ScoreFeedback, {"request_id": "x" * 65, "score": 5}),
+        (ScoreFeedback, {"request_id": "req-1", "score": 0}),
+        (ScoreFeedback, {"request_id": "req-1", "score": 6}),
+        (ScoreFeedback, {"request_id": "req-1", "score": True}),
+        (ScoreFeedback, {"request_id": "req-1", "score": 1.0}),
+        (ScoreFeedback, {"request_id": "req-1", "score": 5, "extra": "field"}),
     ],
 )
 def test_request_models_validate_core_rules(
@@ -384,3 +410,94 @@ def test_mcp_response_rejects_missing_or_conflicting_members(
 def test_mcp_response_id_must_match_request() -> None:
     with pytest.raises(ResponseValidationError, match="id"):
         MCPToolResponse.from_payload(mcp_payload("ok"), expected_id=2)
+
+
+def test_search_supports_discovered_tags_and_optional_result_text() -> None:
+    request = SearchRequest(query="example", tag="new_domain.new_capability")
+    assert request.to_payload()["tag"] == "new_domain.new_capability"
+
+    response = SearchResponse.from_payload({
+        "code": 0,
+        "message": "success",
+        "data": {
+            "results": [
+                {"title": "", "url": "https://example.com"},
+                {
+                    "title": "Markdown",
+                    "url": "https://example.com/markdown",
+                    "content": "# Extracted heading",
+                },
+            ],
+            "metadata": {"total_results": 2, "search_time_ms": 1},
+        },
+    })
+    assert response.data.results[0].snippet is None
+    assert response.data.results[0].content is None
+    assert response.data.results[1].content == "# Extracted heading"
+
+
+def test_rest_domain_selectors_preserve_repeated_parameters() -> None:
+    domains = [*Domain, "new_domain", "code"]
+    request = GetSubDomainsRequest.from_selector(domains=domains)
+    assert request.to_query_params() == [("domain", str(domain)) for domain in domains]
+    assert GetSubDomainsRequest.from_selector(domain="unknown").to_query_params() == [
+        ("domain", "unknown")
+    ]
+    with pytest.raises(TypeError, match="sequence"):
+        GetSubDomainsRequest.from_selector(domains="code")
+
+
+def test_extract_accepts_long_http_urls() -> None:
+    url = "https://example.com/" + "x" * 3000
+    assert ExtractRequest.from_url(url).to_payload() == {"url": url}
+    assert ExtractArguments.from_url(url).to_tool_call().arguments == {"url": url}
+
+
+@pytest.mark.parametrize("model", [SearchResponse, ExtractResponse, SubDomainsResponse])
+def test_rest_envelopes_preserve_error_codes_before_validating_data(
+    model: type[SearchResponse | ExtractResponse | SubDomainsResponse],
+) -> None:
+    with pytest.raises(APIError) as caught:
+        model.from_payload({
+            "code": -1,
+            "message": "Invalid request",
+            "error_code": "invalid_extract_url",
+            "request_id": "req-error",
+        })
+    assert caught.value.error_code == "invalid_extract_url"
+    assert caught.value.request_id == "req-error"
+
+    for payload in ({"message": "success"}, {"code": 0, "message": "success"}):
+        with pytest.raises(ResponseValidationError):
+            model.from_payload(payload)
+
+
+def test_score_accepts_models_and_mappings_at_batch_limits() -> None:
+    entries = [ScoreFeedback(request_id="a" * 64, score=1)] + [
+        {"request_id": f"request-{index}", "score": 5} for index in range(9)
+    ]
+    arguments = ScoreArguments.from_feedbacks(entries)
+    assert len(arguments.feedbacks) == 10
+    assert ScoreArguments.from_feedbacks(arguments) is arguments
+    assert arguments.to_tool_call().name == ToolName.SCORE
+    assert arguments.to_payload()["feedbacks"] == [
+        {"request_id": "a" * 64, "score": 1},
+        *[{"request_id": f"request-{index}", "score": 5} for index in range(9)],
+    ]
+
+
+def test_mcp_preserves_structured_content_and_search_metadata() -> None:
+    structured = {"url": "https://example.com", "title": "Page", "content": "Text"}
+    meta = {"request_id": "req-1", "request_ids": ["req-1", "req-2"]}
+    result = MCPToolResponse.from_payload({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+            "content": [],
+            "structuredContent": structured,
+            "_meta": meta,
+        },
+    })
+    assert result.structured_content == structured
+    assert result.meta == meta
+    assert result.model_dump(by_alias=True)["_meta"] == meta

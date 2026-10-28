@@ -42,6 +42,7 @@ class APIError(AnySearchError):
         *,
         status: int | None = None,
         code: int | str | None = None,
+        error_code: str | None = None,
         request_id: str | None = None,
         data: Any = None,
         headers: dict[str, str] | None = None,
@@ -49,6 +50,7 @@ class APIError(AnySearchError):
         super().__init__(message)
         self.status = status
         self.code = code
+        self.error_code = error_code
         self.request_id = request_id
         self.data = data
         self.headers = headers or {}

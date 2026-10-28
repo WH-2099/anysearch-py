@@ -21,7 +21,10 @@ from .models import (
     BatchSearchArguments,
     Domain,
     ExtractArguments,
+    ExtractRequest,
+    ExtractResponse,
     GetSubDomainsArguments,
+    GetSubDomainsRequest,
     JsonObject,
     JsonValue,
     MCPArguments,
@@ -29,17 +32,22 @@ from .models import (
     MCPToolResponse,
     MCPToolResult,
     OutputFormat,
+    ScoreArguments,
+    ScoreFeedback,
     SearchArgumentInput,
     SearchArguments,
     SearchRequest,
     SearchResponse,
     SearchTag,
+    SubDomainsResponse,
     ToolName,
     Zone,
 )
 
 API_BASE_URL = "https://api.anysearch.com"
 REST_SEARCH_PATH = "/v1/search"
+REST_EXTRACT_PATH = "/v1/extract"
+REST_SUB_DOMAINS_PATH = "/v1/sub-domains"
 MCP_PATH = "/mcp"
 MCP_CLIENT = "mcp/1.0.0"
 USER_AGENT = f"anysearch-py/{version('anysearch-py')}"
@@ -123,6 +131,7 @@ class _HTTPClient:
             details.message,
             status=status,
             code=details.code,
+            error_code=details.error_code,
             request_id=request_id,
             data=details.data,
             headers=response_headers,
@@ -159,13 +168,21 @@ class _SyncHTTPClient(_HTTPClient):
         if self.owns_http:
             self.http.clear()
 
-    def post_json(self, path: str, payload: JsonObject) -> Any:
+    def request_json(
+        self,
+        method: str,
+        path: str,
+        payload: JsonObject | None = None,
+        *,
+        fields: Sequence[tuple[str, str]] | None = None,
+    ) -> Any:
         try:
             response = self.http.request(
-                "POST",
+                method,
                 self._url(path),
                 headers=self._headers(),
                 json=payload,
+                fields=fields,
             )
         except urllib3.exceptions.HTTPError as exc:
             msg = "AnySearch HTTP request failed"
@@ -212,13 +229,21 @@ class _AsyncHTTPClient(_HTTPClient):
         if self.owns_http:
             await self.http.clear()
 
-    async def post_json(self, path: str, payload: JsonObject) -> Any:
+    async def request_json(
+        self,
+        method: str,
+        path: str,
+        payload: JsonObject | None = None,
+        *,
+        fields: Sequence[tuple[str, str]] | None = None,
+    ) -> Any:
         try:
             response = await self.http.request(
-                "POST",
+                method,
                 self._url(path),
                 headers=self._headers(),
                 json=payload,
+                fields=fields,
             )
         except urllib3.exceptions.HTTPError as exc:
             msg = "AnySearch HTTP request failed"
@@ -258,8 +283,29 @@ class Client(_SyncHTTPClient):
             params=params,
             output_format=output_format,
         )
-        payload = self.post_json(REST_SEARCH_PATH, search_request.to_payload())
+        payload = self.request_json(
+            "POST", REST_SEARCH_PATH, search_request.to_payload()
+        )
         return SearchResponse.from_payload(payload)
+
+    def extract(self, url: ExtractRequest | str) -> ExtractResponse:
+        request = (
+            url if isinstance(url, ExtractRequest) else ExtractRequest.from_url(url)
+        )
+        payload = self.request_json("POST", REST_EXTRACT_PATH, request.to_payload())
+        return ExtractResponse.from_payload(payload)
+
+    def get_sub_domains(
+        self,
+        *,
+        domain: Domain | str | None = None,
+        domains: Sequence[Domain | str] | None = None,
+    ) -> SubDomainsResponse:
+        request = GetSubDomainsRequest.from_selector(domain=domain, domains=domains)
+        payload = self.request_json(
+            "GET", REST_SUB_DOMAINS_PATH, fields=request.to_query_params()
+        )
+        return SubDomainsResponse.from_payload(payload)
 
 
 class MCPClient(_SyncHTTPClient):
@@ -294,7 +340,8 @@ class MCPClient(_SyncHTTPClient):
     ) -> MCPToolResult:
         tool_call = MCPToolCall.from_arguments(tool, arguments)
         request_id = next(self.ids)
-        payload = self.post_json(
+        payload = self.request_json(
+            "POST",
             MCP_PATH,
             tool_call.to_request(request_id).to_payload(),
         )
@@ -346,6 +393,12 @@ class MCPClient(_SyncHTTPClient):
     def extract(self, url: str) -> str:
         return self.call_tool(ExtractArguments.from_url(url)).text
 
+    def score(
+        self,
+        feedbacks: ScoreArguments | Sequence[ScoreFeedback | Mapping[str, Any]],
+    ) -> str:
+        return self.call_tool(ScoreArguments.from_feedbacks(feedbacks)).text
+
 
 class AsyncClient(_AsyncHTTPClient):
     """Asynchronous AnySearch REST API client."""
@@ -370,8 +423,31 @@ class AsyncClient(_AsyncHTTPClient):
             params=params,
             output_format=output_format,
         )
-        payload = await self.post_json(REST_SEARCH_PATH, search_request.to_payload())
+        payload = await self.request_json(
+            "POST", REST_SEARCH_PATH, search_request.to_payload()
+        )
         return SearchResponse.from_payload(payload)
+
+    async def extract(self, url: ExtractRequest | str) -> ExtractResponse:
+        request = (
+            url if isinstance(url, ExtractRequest) else ExtractRequest.from_url(url)
+        )
+        payload = await self.request_json(
+            "POST", REST_EXTRACT_PATH, request.to_payload()
+        )
+        return ExtractResponse.from_payload(payload)
+
+    async def get_sub_domains(
+        self,
+        *,
+        domain: Domain | str | None = None,
+        domains: Sequence[Domain | str] | None = None,
+    ) -> SubDomainsResponse:
+        request = GetSubDomainsRequest.from_selector(domain=domain, domains=domains)
+        payload = await self.request_json(
+            "GET", REST_SUB_DOMAINS_PATH, fields=request.to_query_params()
+        )
+        return SubDomainsResponse.from_payload(payload)
 
 
 class AsyncMCPClient(_AsyncHTTPClient):
@@ -406,7 +482,8 @@ class AsyncMCPClient(_AsyncHTTPClient):
     ) -> MCPToolResult:
         tool_call = MCPToolCall.from_arguments(tool, arguments)
         request_id = next(self.ids)
-        payload = await self.post_json(
+        payload = await self.request_json(
+            "POST",
             MCP_PATH,
             tool_call.to_request(request_id).to_payload(),
         )
@@ -460,4 +537,11 @@ class AsyncMCPClient(_AsyncHTTPClient):
 
     async def extract(self, url: str) -> str:
         result = await self.call_tool(ExtractArguments.from_url(url))
+        return result.text
+
+    async def score(
+        self,
+        feedbacks: ScoreArguments | Sequence[ScoreFeedback | Mapping[str, Any]],
+    ) -> str:
+        result = await self.call_tool(ScoreArguments.from_feedbacks(feedbacks))
         return result.text

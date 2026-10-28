@@ -7,6 +7,7 @@ from enum import StrEnum
 from typing import Annotated, Any, ClassVar, Literal, Self
 
 from pydantic import (
+    AnyHttpUrl,
     BaseModel,
     ConfigDict,
     Field,
@@ -94,11 +95,10 @@ class Domain(StrEnum):
 
 
 class SearchTag(StrEnum):
-    ACADEMIC_BIOMEDICAL = "academic.biomedical"
     ACADEMIC_CITATION = "academic.citation"
     ACADEMIC_DATASET = "academic.dataset"
-    ACADEMIC_PREPRINT = "academic.preprint"
-    ACADEMIC_SEARCH = "academic.search"
+    ACADEMIC_PAPER = "academic.paper"
+    ACADEMIC_PERSON = "academic.person"
     AGRICULTURE_FAO = "agriculture.fao"
     BUSINESS_COMPANY = "business.company"
     BUSINESS_JOBS = "business.jobs"
@@ -123,9 +123,9 @@ class SearchTag(StrEnum):
     HEALTH_STATS = "health.stats"
     HEALTH_TRIAL = "health.trial"
     IP_GLOBAL = "ip.global"
-    LEGAL_CASE = "legal.case"
+    LEGAL_ENFORCEMENT = "legal.enforcement"
+    LEGAL_JUDICIAL = "legal.judicial"
     LEGAL_LEGISLATION = "legal.legislation"
-    LEGAL_STATUTE = "legal.statute"
     RESOURCE_IMAGE = "resource.image"
     SECURITY_INTEL = "security.intel"
     SECURITY_NOISE = "security.noise"
@@ -151,14 +151,15 @@ class ToolName(StrEnum):
     BATCH_SEARCH = "batch_search"
     GET_SUB_DOMAINS = "get_sub_domains"
     EXTRACT = "extract"
+    SCORE = "score"
 
 
 class SearchRequest(StrictRequestModel):
     """REST /v1/search request."""
 
     query: NonEmptyString
-    max_results: StrictInt = Field(default=10, ge=1, le=20)
-    tag: SearchTag | None = None
+    max_results: StrictInt = Field(default=10, ge=1, le=10)
+    tag: SearchTag | SubDomainName | None = None
     zone: Zone | None = None
     language: NonEmptyString | None = None
     params: JsonObject | None = None
@@ -201,7 +202,7 @@ class SearchResult(ResponseModel):
 
     title: str
     url: HttpUrl
-    snippet: str
+    snippet: str | None = None
     content: str | None = None
 
 
@@ -224,6 +225,7 @@ class APIErrorDetails(ResponseModel):
 
     message: str
     code: int | str | None = None
+    error_code: str | None = None
     request_id: str | None = None
     data: JsonValue | None = None
 
@@ -254,6 +256,11 @@ class APIErrorDetails(ResponseModel):
         return cls(
             message=message,
             code=code,
+            error_code=(
+                payload.get("error_code")
+                if isinstance(payload.get("error_code"), str)
+                else None
+            ),
             request_id=request_id,
             data=cls.coerce_json(payload.get("data")),
         )
@@ -277,6 +284,7 @@ class APIEnvelope[DataT](ResponseModel):
     code: StrictInt
     message: str
     request_id: str | None = None
+    error_code: str | None = None
     data: DataT | None = None
 
     @computed_field
@@ -291,9 +299,24 @@ class APIEnvelope[DataT](ResponseModel):
         raise APIError(
             self.message or "AnySearch request failed",
             code=self.code,
+            error_code=self.error_code,
             request_id=self.request_id,
             data=APIErrorDetails.coerce_json(self.data),
         )
+
+    @classmethod
+    def from_payload(cls, payload: Any) -> Self:
+        try:
+            APIEnvelope[Any].model_validate(payload).raise_if_error()
+        except ValidationError as exc:
+            msg = "response does not match the AnySearch envelope schema"
+            raise ResponseValidationError(msg, payload=payload) from exc
+
+        try:
+            return cls.model_validate(payload)
+        except ValidationError as exc:
+            msg = "successful response does not match the documented schema"
+            raise ResponseValidationError(msg, payload=payload) from exc
 
 
 class SearchResponse(APIEnvelope[SearchData]):
@@ -301,19 +324,86 @@ class SearchResponse(APIEnvelope[SearchData]):
 
     data: SearchData
 
-    @classmethod
-    def from_payload(cls, payload: Any) -> Self:
-        try:
-            APIEnvelope[Any].model_validate(payload).raise_if_error()
-        except ValidationError as exc:
-            msg = "search response does not match the AnySearch envelope schema"
-            raise ResponseValidationError(msg, payload=payload) from exc
 
-        try:
-            return cls.model_validate(payload)
-        except ValidationError as exc:
-            msg = "successful search response does not match the documented schema"
-            raise ResponseValidationError(msg, payload=payload) from exc
+class ExtractRequest(StrictRequestModel):
+    """REST /v1/extract request."""
+
+    url: AnyHttpUrl
+
+    @classmethod
+    def from_url(cls, url: str) -> Self:
+        return cls.model_validate({"url": url})
+
+
+class ExtractData(ResponseModel):
+    url: AnyHttpUrl
+    title: str
+    content: str
+
+
+class ExtractResponse(APIEnvelope[ExtractData]):
+    data: ExtractData
+
+
+class GetSubDomainsRequest(StrictRequestModel):
+    """REST /v1/sub-domains selectors."""
+
+    domain: NonEmptyString | None = None
+    domains: tuple[NonEmptyString, ...] | None = Field(default=None, min_length=1)
+
+    @classmethod
+    def from_selector(
+        cls,
+        *,
+        domain: Domain | str | None = None,
+        domains: Sequence[Domain | str] | None = None,
+    ) -> Self:
+        if isinstance(domains, str):
+            msg = "domains must be a sequence, not a string"
+            raise TypeError(msg)
+        return cls.model_validate(
+            {
+                "domain": domain,
+                "domains": tuple(domains) if domains is not None else None,
+            },
+        )
+
+    @model_validator(mode="after")
+    def validate_domain_selector(self) -> Self:
+        if (self.domain is None) == (self.domains is None):
+            msg = "provide exactly one of domain or domains"
+            raise ValueError(msg)
+        return self
+
+    def to_query_params(self) -> list[tuple[str, str]]:
+        domains = (self.domain,) if self.domain is not None else self.domains or ()
+        return [("domain", domain) for domain in domains]
+
+
+class SubDomainParameter(ResponseModel):
+    description: str
+    required: StrictBool
+    sort_order: StrictInt
+
+
+class SubDomain(ResponseModel):
+    sub_domain: str
+    description: str
+    params: dict[str, SubDomainParameter] = Field(default_factory=dict)
+
+
+class DomainCapabilities(ResponseModel):
+    domain: str
+    description: str
+    sub_domains: tuple[SubDomain, ...]
+
+
+class SubDomainsData(ResponseModel):
+    domains: tuple[DomainCapabilities, ...]
+
+
+class SubDomainsResponse(APIEnvelope[SubDomainsData]):
+    data: SubDomainsData
 
 
 class MCPArguments(StrictRequestModel):
@@ -430,7 +520,7 @@ class BatchSearchArguments(MCPArguments):
         return cls(queries=tuple(items))
 
 
-class GetSubDomainsArguments(MCPArguments):
+class GetSubDomainsArguments(GetSubDomainsRequest, MCPArguments):
     """MCP get_sub_domains tool arguments."""
 
     tool_name = ToolName.GET_SUB_DOMAINS
@@ -438,43 +528,33 @@ class GetSubDomainsArguments(MCPArguments):
     domain: Domain | None = None
     domains: tuple[Domain, ...] | None = Field(default=None, min_length=1, max_length=5)
 
-    @classmethod
-    def from_selector(
-        cls,
-        *,
-        domain: Domain | str | None = None,
-        domains: Sequence[Domain | str] | None = None,
-    ) -> Self:
-        if isinstance(domains, str):
-            msg = "domains must be a sequence, not a string"
-            raise TypeError(msg)
-        return cls.model_validate(
-            {
-                "domain": domain,
-                "domains": tuple(domains) if domains is not None else None,
-            },
-        )
 
-    @model_validator(mode="after")
-    def validate_domain_selector(self) -> Self:
-        has_domain = self.domain is not None
-        has_domains = self.domains is not None
-        if has_domain == has_domains:
-            msg = "provide exactly one of domain or domains"
-            raise ValueError(msg)
-        return self
-
-
-class ExtractArguments(MCPArguments):
+class ExtractArguments(ExtractRequest, MCPArguments):
     """MCP extract tool arguments."""
 
     tool_name = ToolName.EXTRACT
 
-    url: HttpUrl
+
+class ScoreFeedback(StrictRequestModel):
+    request_id: NonEmptyString = Field(max_length=64)
+    score: StrictInt = Field(ge=1, le=5)
+
+
+class ScoreArguments(MCPArguments):
+    """MCP score tool arguments."""
+
+    tool_name = ToolName.SCORE
+
+    feedbacks: tuple[ScoreFeedback, ...] = Field(min_length=1, max_length=10)
 
     @classmethod
-    def from_url(cls, url: str) -> Self:
-        return cls.model_validate({"url": url})
+    def from_feedbacks(
+        cls,
+        feedbacks: ScoreArguments | Sequence[ScoreFeedback | Mapping[str, Any]],
+    ) -> Self:
+        if isinstance(feedbacks, cls):
+            return feedbacks
+        return cls.model_validate({"feedbacks": feedbacks})
 
 
 class MCPContentBlock(ResponseModel):
@@ -496,6 +576,10 @@ class MCPToolResult(ResponseModel):
 
     content: tuple[MCPContentBlock, ...]
     is_error: StrictBool = Field(default=False, alias="isError")
+    structured_content: JsonObject | None = Field(
+        default=None, alias="structuredContent"
+    )
+    meta: JsonObject | None = Field(default=None, alias="_meta")
 
     @computed_field
     @property

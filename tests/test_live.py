@@ -48,3 +48,19 @@ def test_live_mcp_get_sub_domains_smoke() -> None:
         text = client.get_sub_domains(domain=Domain.FINANCE)
 
     assert "finance" in text.lower()
+
+
+def test_live_rest_get_sub_domains_smoke() -> None:
+    with Client(api_key=load_api_key()) as client:
+        response = client.get_sub_domains(domains=[Domain.CODE, Domain.FINANCE])
+
+    assert {domain.domain for domain in response.data.domains} == {"code", "finance"}
+    assert all(domain.sub_domains for domain in response.data.domains)
+
+
+def test_live_rest_extract_smoke() -> None:
+    with Client(api_key=load_api_key()) as client:
+        response = client.extract("https://example.com")
+
+    assert response.data.title
+    assert response.data.content

@@ -16,10 +16,13 @@ from anysearch_py import (
     BatchSearchArguments,
     Client,
     Domain,
+    ExtractRequest,
     HTTPStatusError,
     MCPClient,
     ResponseDecodeError,
     ResponseValidationError,
+    ScoreArguments,
+    ScoreFeedback,
     SearchArguments,
     SearchRequest,
     SearchResponse,
@@ -459,7 +462,9 @@ def test_prebuilt_requests_reject_ignored_modifiers() -> None:
 
 
 def test_async_clients_use_same_payload_shapes() -> None:
-    async def run() -> tuple[str, str, list[tuple[tuple[Any, ...], dict[str, Any]]]]:
+    async def run() -> tuple[
+        str | None, str, list[tuple[tuple[Any, ...], dict[str, Any]]]
+    ]:
         rest_http = AsyncFakeHTTP(AsyncFakeResponse(search_payload()))
         mcp_http = AsyncFakeHTTP(AsyncFakeResponse(mcp_payload("mcp ok")))
 
@@ -575,3 +580,167 @@ def test_async_client_awaits_owned_pool_clear(
     asyncio.run(run())
 
     assert http.cleared
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["https://example.com/article", ExtractRequest(url="https://example.com/article")],
+)
+def test_rest_extract_clients_send_and_parse_documented_payload(
+    url: ExtractRequest | str,
+) -> None:
+    payload = {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "url": "https://example.com/article",
+            "title": "Example Article",
+            "content": "# Extracted content",
+        },
+    }
+    http = FakeHTTP(FakeResponse(payload, headers={"X-Request-ID": "req-extract"}))
+    async_http = AsyncFakeHTTP(
+        AsyncFakeResponse(payload, headers={"X-Request-ID": "req-extract"})
+    )
+
+    response = Client(http=http).extract(url)
+    async_response = asyncio.run(AsyncClient(http=async_http).extract(url))
+
+    assert response == async_response
+    assert response.data.title == "Example Article"
+    assert response.data.content == "# Extracted content"
+    assert response.request_id == "req-extract"
+    assert http.calls == async_http.calls
+    args, kwargs = http.calls[0]
+    assert args == ("POST", "https://api.anysearch.com/v1/extract")
+    assert kwargs["json"] == {"url": "https://example.com/article"}
+
+
+@pytest.mark.parametrize(
+    ("selectors", "fields"),
+    [
+        ({"domain": Domain.CODE}, [("domain", "code")]),
+        (
+            {"domains": [Domain.CODE, "finance", "code"]},
+            [("domain", "code"), ("domain", "finance"), ("domain", "code")],
+        ),
+        ({"domain": "unknown"}, [("domain", "unknown")]),
+    ],
+)
+def test_rest_domain_clients_use_repeated_get_parameters(
+    selectors: dict[str, Any], fields: list[tuple[str, str]]
+) -> None:
+    domains = (
+        []
+        if selectors.get("domain") == "unknown"
+        else [
+            {
+                "domain": "code",
+                "description": "Developer documentation and code search",
+                "sub_domains": [
+                    {
+                        "sub_domain": "code.doc",
+                        "description": "Documentation",
+                        "params": {
+                            "library": {
+                                "description": "Library name",
+                                "required": True,
+                                "sort_order": 0,
+                            }
+                        },
+                    },
+                    {"sub_domain": "code.snippet", "description": "Code search"},
+                ],
+            }
+        ]
+    )
+    payload = {"code": 0, "message": "success", "data": {"domains": domains}}
+    http = FakeHTTP(FakeResponse(payload))
+    async_http = AsyncFakeHTTP(AsyncFakeResponse(payload))
+
+    response = Client(http=http).get_sub_domains(**selectors)
+    async_response = asyncio.run(
+        AsyncClient(http=async_http).get_sub_domains(**selectors)
+    )
+
+    assert response == async_response
+    assert http.calls == async_http.calls
+    args, kwargs = http.calls[0]
+    assert args == ("GET", "https://api.anysearch.com/v1/sub-domains")
+    assert kwargs["fields"] == fields
+    assert kwargs["json"] is None
+    if domains:
+        capabilities = response.data.domains[0]
+        assert capabilities.sub_domains[0].params["library"].required
+        assert capabilities.sub_domains[1].params == {}
+    else:
+        assert not response.data.domains
+
+
+@pytest.mark.parametrize(
+    ("method", "arguments"),
+    [
+        ("search", {"query": "hello"}),
+        ("extract", {"url": "https://example.com/article"}),
+        ("get_sub_domains", {"domain": "code"}),
+    ],
+)
+@pytest.mark.parametrize("status", [200, 400])
+def test_rest_clients_preserve_stable_error_codes(
+    method: str, arguments: dict[str, str], status: int
+) -> None:
+    payload = {
+        "code": -1,
+        "message": "Invalid request",
+        "error_code": "invalid_extract_url",
+    }
+    headers = {"X-Request-ID": "req-error"}
+    http = FakeHTTP(FakeResponse(payload, status=status, headers=headers))
+    async_http = AsyncFakeHTTP(
+        AsyncFakeResponse(payload, status=status, headers=headers)
+    )
+    error_type = APIError if status == 200 else HTTPStatusError
+
+    with pytest.raises(error_type) as sync_error:
+        getattr(Client(http=http), method)(**arguments)
+    with pytest.raises(error_type) as async_error:
+        asyncio.run(getattr(AsyncClient(http=async_http), method)(**arguments))
+
+    for error in (sync_error.value, async_error.value):
+        assert error.code == -1
+        assert error.error_code == "invalid_extract_url"
+        assert error.request_id == "req-error"
+
+
+@pytest.mark.parametrize(
+    "feedbacks",
+    [
+        [{"request_id": "req-search", "score": 5}],
+        ScoreArguments(feedbacks=(ScoreFeedback(request_id="req-search", score=5),)),
+    ],
+)
+def test_mcp_score_clients_send_validated_feedback(
+    feedbacks: Any,
+) -> None:
+    http = FakeHTTP(FakeResponse(mcp_payload("success")))
+    async_http = AsyncFakeHTTP(AsyncFakeResponse(mcp_payload("success")))
+
+    assert MCPClient(http=http).score(feedbacks) == "success"
+    assert asyncio.run(AsyncMCPClient(http=async_http).score(feedbacks)) == "success"
+    assert http.calls == async_http.calls
+    assert http.calls[0][1]["json"]["params"] == {
+        "name": "score",
+        "arguments": {"feedbacks": [{"request_id": "req-search", "score": 5}]},
+    }
+
+
+def test_mcp_score_rejects_invalid_feedback_before_sending() -> None:
+    http = FakeHTTP(FakeResponse(mcp_payload("success")))
+    async_http = AsyncFakeHTTP(AsyncFakeResponse(mcp_payload("success")))
+
+    with pytest.raises(ValueError, match="feedbacks"):
+        MCPClient(http=http).score([])
+    with pytest.raises(ValueError, match="feedbacks"):
+        asyncio.run(AsyncMCPClient(http=async_http).score([]))
+    assert not http.calls
+    assert not async_http.calls

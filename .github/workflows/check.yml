@@ -18,7 +18,9 @@ jobs:
           persist-credentials: false
 
       - name: Setup uv and Python
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@v10.3.2
+        with:
+          version: latest
 
       - name: Setup just
         uses: extractions/setup-just@v4

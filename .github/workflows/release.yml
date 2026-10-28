@@ -28,7 +28,9 @@ jobs:
           persist-credentials: false
 
       - name: Setup Python and uv
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@v10.3.2
+        with:
+          version: latest
 
       - id: verify
         name: Verify tag matches pyproject.toml and main
@@ -74,7 +76,9 @@ jobs:
           persist-credentials: false
 
       - name: Setup Python and uv
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@v10.3.2
+        with:
+          version: latest
 
       - name: Build distributions
         run: uv build --no-create-gitignore --no-sources
